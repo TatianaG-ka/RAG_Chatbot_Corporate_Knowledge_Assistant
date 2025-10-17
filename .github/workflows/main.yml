@@ -1,24 +1,21 @@
-name: Sync to Hugging Face hub
+name: sync-to-hub
 on:
   push:
-    branches: [main]
-
-  # to run this workflow manually from the Actions tab
-  workflow_dispatch:
+    branches: [ main ]
+  workflow_dispatch: {}   
 
 jobs:
-  sync-to-hub:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          lfs: true
+
       - name: Force push to HF Space
         run: |
-          git config tatiana.golinska@gmail.com "actions@github.com"
-          git config Tatiana Golinska "github-actions"
+          git config user.email "actions@github.com"
+          git config user.name "github-actions"
           git push --force \
-           https://user:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/TatianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant \
+            https://user:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/TatianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant \
             main
-          
