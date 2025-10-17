@@ -14,7 +14,11 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
-      - name: Push to hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://TatianaGol:$HF_TOKEN@huggingface.co/spaces/TatianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant main
+      - name: Force push to HF Space
+        run: |
+          git config tatiana.golinska@gmail.com "actions@github.com"
+          git config Tetiana Golinska "github-actions"
+          git push --force \
+           https://user:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/TatianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant \
+            main
+          
