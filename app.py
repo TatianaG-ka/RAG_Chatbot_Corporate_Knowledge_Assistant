@@ -1,0 +1,253 @@
+import os
+from pathlib import Path
+from typing import List, Any
+
+import streamlit as st
+from dotenv import load_dotenv
+
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+
+from langchain.chains import create_retrieval_chain, create_history_aware_retriever
+from langchain.chains.combine_documents import create_stuff_documents_chain
+
+from langchain_groq import ChatGroq
+from langchain_community.chat_message_histories import ChatMessageHistory
+
+from rag_index import (
+    build_embeddings,
+    load_faiss,
+    load_paths,
+    build_faiss_from_docs,
+    ensure_demo_index_exists,
+    HAS_MD,
+)
+
+load_dotenv()
+HF_TOKEN = os.getenv("HF_TOKEN", "")
+GROQ_ENV = os.getenv("GROQ_API_KEY", "")
+
+if HF_TOKEN:
+    os.environ["HF_TOKEN"] = HF_TOKEN
+
+st.set_page_config(page_title="RAG + ChatGroq Demo", layout="wide")
+st.title("Company Knowledge Assistant — RAG (PDF/TXT/MD) Demo — ChatGroq + FAISS + Citations")
+
+with st.sidebar:
+    st.header("Settings")
+
+    # Workspace - folder na prebuilt
+    workspace = st.text_input("Workspace (company/project name)", value="default_company")
+    persist_dir = Path("vectorstore") / workspace
+
+    groq_api_key = st.text_input("GROQ_API_KEY", value=GROQ_ENV, type="password")
+    model_name = st.selectbox(
+        "Groq model",
+        options=[
+            "llama-3.1-8b-instant",
+            "llama-3.1-70b-versatile",
+            "mixtral-8x7b-32768",
+        ],
+        index=0
+    )
+
+    st.caption("Embeddings: sentence-transformers/all-MiniLM-L6-v2")
+    st.markdown("---")
+    st.caption("Quick demo uses a pre-built index (from the repo). Upload builds the index in session memory.")
+
+# Helpers
+def _build_llm(api_key: str, model: str):
+    if not api_key:
+        st.error("No GROQ_API_KEY. Enter the key in the side panel.")
+        st.stop()
+    return ChatGroq(groq_api_key=api_key, model_name=model)
+
+def _format_citations(context_docs: List[Document]):
+    seen = set()
+    out = []
+    for d in context_docs:
+        src = d.metadata.get("source") or d.metadata.get("file_path") or "unknown"
+        page = d.metadata.get("page")
+        key = (src, page)
+        if key in seen:
+            continue
+        seen.add(key)
+        name = Path(src).name
+        out.append(f"- {name}, page {page + 1}" if page is not None else f"- {name}")
+    return out
+
+def _save_uploads_to_tmp(files: List[Any]) -> List[Path]:
+    tmp_dir = Path("tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    saved: List[Path] = []
+    for up in files or []:
+        p = tmp_dir / up.name
+        try:
+            with open(p, "wb") as f:
+                f.write(up.getbuffer())
+            saved.append(p)
+        except Exception as e:
+            st.error(f"Write error {up.name}: {e}")
+    return saved
+
+def _build_index_from_uploads(files: List[Any], emb):
+    """Builds FAISS from files uploaded by the user (session)."""
+    paths = _save_uploads_to_tmp(files)
+    if not paths:
+        st.warning("No files to load.")
+        return None, 0
+    docs = load_paths(paths)
+    if not docs:
+        st.warning("Failed to load documents (check formats).")
+        return None, 0
+    vs, n_chunks = build_faiss_from_docs(docs, emb)
+    return vs, n_chunks
+
+# Mode/Index Configuration
+MODE_QUICK = "Quick demo (prebuilt)"
+MODE_UPLOAD = "Upload files (sessionally)"
+
+mode = st.radio("Mode:", [MODE_QUICK, MODE_UPLOAD], horizontal=True)
+embeddings = build_embeddings()
+
+VS_KEY = "vs"          
+VS_USER_KEY = "vs_user"
+
+if MODE_QUICK == mode:
+    err = ensure_demo_index_exists(persist_dir)
+    if err:
+        st.error(err)
+        st.stop()
+    vs = load_faiss(persist_dir, embeddings)
+    st.session_state[VS_KEY] = vs
+    st.success("Prebuilt index loaded.")
+    st.caption(f"Path: {persist_dir}")
+
+    cols = st.columns(3)
+    examples = [
+        "How long does a refund take?",
+        "How to reset my password?",
+        "How to apply a software update?",
+    ]
+    for i, ex in enumerate(examples):
+        if cols[i % 3].button(ex):
+            st.session_state["query"] = ex
+else:
+    uploads = st.file_uploader(
+        "Upload documents (PDF/TXT/MD)",
+        type=["pdf", "txt", "md", "markdown"],
+        accept_multiple_files=True,
+        help="Supported: PDF/TXT/MD (MD requires the unstructured package)."
+    )
+    c1, c2 = st.columns([1,1])
+    with c1:
+        if st.button("Build an index from my files"):
+            with st.spinner("Building an index..."):
+                vs_user, n_chunks = _build_index_from_uploads(uploads or [], embeddings)
+                if vs_user:
+                    st.session_state[VS_USER_KEY] = vs_user
+                    st.session_state[VS_KEY] = vs_user   
+                    st.success(f"Index ready ({n_chunks} chunks).")
+    with c2:
+        if st.button("Index reset (session)"):
+            st.session_state.pop(VS_USER_KEY, None)
+            st.session_state.pop(VS_KEY, None)
+            st.info("Sesyjny indeks usunięty.")
+
+# Chat (LLM + Retrieval)
+st.subheader("Chat")
+session_id = st.text_input("Session ID", value="default_session")
+query = st.text_input("Your question:", value=st.session_state.get("query", ""))
+
+# Chat history (per session_id)
+if "stores" not in st.session_state:
+    st.session_state.stores = {}
+
+def _get_session_history(_: str) -> BaseChatMessageHistory:
+    if session_id not in st.session_state.stores:
+        st.session_state.stores[session_id] = ChatMessageHistory()
+    return st.session_state.stores[session_id]
+
+llm = _build_llm(groq_api_key, model_name)
+
+contextualize_q_system_prompt = (
+    "Given the chat history and the latest user input, rewrite it as a standalone question "
+    "that can be understood without the chat history. Do NOT answer the question."
+)
+contextualize_q_prompt = ChatPromptTemplate.from_messages(
+    [("system", contextualize_q_system_prompt),
+     MessagesPlaceholder("chat_history"),
+     ("human", "{input}")]
+)
+
+qa_system_prompt = (
+    "You are a QA assistant answering questions based on the company's knowledge base.\n"
+    "Use ONLY the provided context. If the answer is not in the context, say 'I don't know'.\n"
+    "At the end, append a 'Citations' section listing unique file names (and pages if available).\n\n"
+    "{context}"
+)
+qa_prompt = ChatPromptTemplate.from_messages(
+    [("system", qa_system_prompt),
+     MessagesPlaceholder("chat_history"),
+     ("human", "{input}")]
+)
+
+def _get_retriever():
+    store = st.session_state.get(VS_KEY)
+    if store is None:
+        st.warning("Index not loaded. Use 'Quick demo (prebuilt)' or build index from uploads.")
+        st.stop()
+    return store.as_retriever(search_kwargs={"k": 4})
+
+retriever = _get_retriever()
+history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
+doc_chain = create_stuff_documents_chain(llm, qa_prompt)
+rag_chain = create_retrieval_chain(history_aware_retriever, doc_chain)
+
+if st.button("Send") and query.strip():
+    conv = RunnableWithMessageHistory(
+        rag_chain,
+        _get_session_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+        output_messages_key="answer",
+    )
+    cfg = {"configurable": {"session_id": session_id}}
+
+    with st.spinner("Thinks..."):
+        result = conv.invoke({"input": query}, config=cfg)
+
+    answer = result.get("answer") or result.get("result") or ""
+    ctx_docs: List[Document] = result.get("context", [])
+    citations = _format_citations(ctx_docs)
+
+    st.markdown("### Answer")
+    st.write(answer)
+
+    st.markdown("### Citations")
+    if citations:
+        st.write("\n".join(citations))
+    else:
+        st.write("No citations (retriever returned nothing).")
+
+    with st.expander(" Debug: context (top-k)"):
+        for i, d in enumerate(ctx_docs, 1):
+            src = d.metadata.get("source", "unknown")
+            page = d.metadata.get("page")
+            head = f"[{i}] {Path(src).name}"
+            if page is not None:
+                head += f" (page {page + 1})"
+            st.markdown(f"**{head}**")
+            snippet = d.page_content.strip()
+            st.write(snippet[:800] + ("..." if len(snippet) > 800 else ""))
+
+with st.expander("ℹ️ Info / Limits"):
+    st.markdown(
+        "- Quick demo: uses prebuilt FAISS (from repo)\n"
+        "- Upload: index created in session memory (not saved to disk)\n"
+        "- FAISS load: allow_dangerous_deserialization=True (docs.pkl jest pickle)\n"
+        "- Model LLM: ChatGroq (selection in the sidebar)\n"
+        "- Embeddings: sentence-transformers/all-MiniLM-L6-v2"
+    )
