@@ -11,7 +11,11 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          lfs: true
 
+      - name: Enable Git LFS
+        run: git lfs install
+  
       - name: Force push to HF Space
         run: |
           git config user.email "actions@github.com"
