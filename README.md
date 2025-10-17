@@ -2,7 +2,6 @@
 **ChatGroq + FAISS + Citations**
 
 Each project follows the same consistent format: **overview → tech stack→ architecture → demo → how to run the Project → Screenshots**.
-
 ---
 <a id="toc"></a>
 ## Table of Contents
