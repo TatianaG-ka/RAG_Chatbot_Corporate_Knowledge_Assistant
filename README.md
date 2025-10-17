@@ -1,3 +1,14 @@
+---
+title: RAG Chatbot — Corporate Knowledge Assistant
+emoji: 🧠
+colorFrom: indigo
+colorTo: blue
+sdk: gradio
+app_file: app.py        
+pinned: false
+---
+
+
 # Project 1 – Company Knowledge Assistant — RAG (PDF/TXT/MD) Demo  
 **ChatGroq + FAISS + Citations**
 
