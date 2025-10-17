@@ -28,6 +28,8 @@ tmp/
 venv/
 env/
 ENV/
+gradio-env/
+python==3.10/
 
 # Logs / Temporary / System
 *.log
