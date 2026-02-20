@@ -118,7 +118,7 @@ The resulting index is saved under:
 <a id="demo"></a>
 ## Demo
 
-- Live Demo (Hugging Face Spaces): https://huggingface.co/spaces/TetianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant
+- Live Demo (Hugging Face Spaces) - **The demo is currently disabled**: https://huggingface.co/spaces/TetianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant
 
 - GitHub Repository: https://github.com/TatianaG-ka/RAG_Chatbot_Corporate_Knowledge_Assistant
 
