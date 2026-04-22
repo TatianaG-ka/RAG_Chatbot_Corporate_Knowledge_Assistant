@@ -1,36 +1,41 @@
 from pathlib import Path
 from typing import List
+
 from langchain_core.documents import Document
 
 from rag_index import (
-    EMB_MODEL,
-    CHUNK_SIZE,
     CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    EMB_MODEL,
     HAS_MD,
     build_embeddings,
-    load_paths,
     build_faiss_from_docs,
+    load_paths,
     save_faiss,
 )
 
-# Paths
 ASSETS = Path("./assets")
 OUTDIR = Path("./vectorstore") / "default_company"
+SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md", ".markdown"}
 
 
 def load_assets() -> List[Document]:
-    """
-    Loads all supported files from the ./assets directory
-    (PDF, TXT, MD/MARKDOWN).
-    """
-    paths = [p for p in ASSETS.glob("*")]
+    """Load all supported files from ./assets (PDF / TXT / MD)."""
+    paths = [p for p in ASSETS.glob("*") if p.suffix.lower() in SUPPORTED_SUFFIXES]
     if not paths:
-        print("[WARN] No files found in ./assets. Please add files such as faq.txt, policy.md, or manual.pdf.")
+        print(
+            "[WARN] No supported files found in ./assets "
+            "(expected .pdf/.txt/.md). Please add faq.txt, policy.md, or manual.pdf."
+        )
         return []
-    return load_paths(paths)
+
+    docs, errors = load_paths(paths)
+    for err in errors:
+        print(f"[WARN] {err}")
+    return docs
 
 
-def main():
+def main() -> None:
     print("[INFO] Configuration:")
     print(f"  - EMB_MODEL = {EMB_MODEL}")
     print(f"  - CHUNK_SIZE = {CHUNK_SIZE}, CHUNK_OVERLAP = {CHUNK_OVERLAP}")
@@ -45,7 +50,7 @@ def main():
     print(f"[INFO] Created {n_chunks} text fragments (chunks).")
 
     save_faiss(vs, OUTDIR)
-    print(f"[OK] Index saved to: {OUTDIR}/faiss.index and {OUTDIR}/docs.pkl")
+    print(f"[OK] Index saved to: {OUTDIR}/index.faiss and {OUTDIR}/index.pkl")
 
 
 if __name__ == "__main__":

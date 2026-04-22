@@ -5,17 +5,44 @@ on:
   workflow_dispatch: {}   
 
 jobs:
-  sync:
+  smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Byte-compile sources
+        run: python -m compileall -q app.py rag_index.py build_demo_index.py
+
+      - name: Import smoke test
+        env:
+          GROQ_API_KEY: "ci-placeholder"
+        run: python -c "import rag_index; import build_demo_index; print('imports ok')"
+
+  sync:
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: true
 
       - name: Enable Git LFS
         run: git lfs install
-  
+
       - name: Force push to HF Space
         run: |
           git config user.email "actions@github.com"
