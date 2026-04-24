@@ -3,8 +3,8 @@ title: RAG Chatbot — Corporate Knowledge Assistant
 emoji: 🧠
 colorFrom: indigo
 colorTo: blue
-sdk: gradio
-app_file: app.py        
+sdk: streamlit
+app_file: app.py
 pinned: false
 ---
 
