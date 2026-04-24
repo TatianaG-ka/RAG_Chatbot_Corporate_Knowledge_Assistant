@@ -75,3 +75,8 @@ tmp/
 Pipfile
 Pipfile.lock
 poetry.lock
+
+# FAISS demo index — rebuilt at cold-start from ./assets/, never committed
+# (pickle format drifts across dep versions and breaks on HF runtime bumps —
+# see README ADR-4). Keep the folder off-repo; rebuild is deterministic.
+vectorstore/default_company/

@@ -143,15 +143,22 @@ The resulting index is saved under:
 
 ---
 
-### ADR-4 — Session-memory rebuild for user uploads (security posture)
+### ADR-4 — Never deserialize pickles, rebuild on every cold start
 
-**Context:** `FAISS.load_local` requires `allow_dangerous_deserialization=True` because LangChain persists metadata via `pickle`. A pickle load is arbitrary code execution — fine for a file *I* produced, catastrophic for files uploaded by strangers on the internet.
+**Context:** `FAISS.load_local` requires `allow_dangerous_deserialization=True` because LangChain persists metadata via `pickle`. Pickle loading is arbitrary code execution — fine for a file *I* produced, catastrophic for files uploaded by strangers on the internet. But *"fine for my own pickle"* turned out to be too generous: pickle state format drifts across dependency major versions, and a single hosting-platform runtime bump silently breaks a previously-working index.
 
-**Decision:** two strictly separated code paths (see `rag_index.py` and the `_build_index_from_uploads` helper in `app.py`):
-- **Prebuilt demo index** ships with the repo and loads via `load_faiss()` with the unsafe flag — safe because the index is produced by the same application that loads it.
-- **User uploads** go through `build_faiss_from_docs()`, which rebuilds the index in memory from the raw PDF/TXT/MD bytes and never touches the deserializer.
+**Decision:** never deserialize a pickle at runtime, even our own. Both index paths rebuild the FAISS store in memory from raw bytes:
+- **Quick demo mode** rebuilds the index from `./assets/` (PDF/TXT/MD) on cold start, cached via `@st.cache_resource` for the lifetime of the container (see `get_demo_index` in `app.py`). One-time ~15-30s build cost.
+- **User uploads** rebuild in memory from uploaded PDF/TXT/MD bytes via `build_faiss_from_docs()`; session-scoped, never persisted.
 
-**Why:** even for a personal portfolio demo, "upload anything → gets pickle-unmarshalled" is a footgun I wouldn't want a reviewer to find. Uploaded filenames are also stripped via `_safe_filename` to prevent path traversal. The cost is negligible — session indexes are small — and the security posture is the boring, correct one.
+Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. `load_faiss()` with the unsafe flag is retained in `rag_index.py` for local offline use, but is no longer called by the deployed app.
+
+**Why:** two reasons for the same "never load a pickle at runtime" rule.
+
+1. **Security.** "Upload anything → gets pickle-unmarshalled" is a footgun I wouldn't want a reviewer to find.
+2. **Stability (validated the hard way).** An HF Space runtime bump on 2026-04-24 broke the previously-shipped prebuilt pickle with `KeyError: '__fields_set__'` at `pydantic/v1/main.py:423`. The pydantic v1 state schema embedded in the pickle did not match what pydantic v2's v1-compat layer expected on the upgraded Python 3.13 container. Rebuilding from raw documents at cold start sidesteps dependency-version drift entirely — the index is whatever the currently-installed libraries produce, on every cold start.
+
+**Trade-off:** the first request after a container cold start waits ~15-30s for the index to build. `@st.cache_resource` keeps it hot for the rest of the container's lifetime, and user-upload indexes intentionally do not survive across sessions.
 
 ---
 
