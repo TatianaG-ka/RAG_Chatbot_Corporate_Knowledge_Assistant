@@ -8,6 +8,7 @@ langchain-groq>=0.1.0
 sentence-transformers>=2.7
 faiss-cpu>=1.7
 unstructured>=0.14
+markdown>=3.5
 pypdf>=4.0
 reportlab
 
