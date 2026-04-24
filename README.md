@@ -17,9 +17,10 @@ Each project follows the same consistent format: **overview → tech stack→ ar
 <a id="toc"></a>
 ## Table of Contents
 - [Project Overview](#project-overview)
-- [Problem Statement](#problem-statement)
+- [Why this project](#why-this-project)
 - [Planned Solution & Architecture](#solution-architecture)
 - [What builds the FAISS index?](#what-builds-faiss-index)
+- [Key architectural decisions](#key-decisions)
 - [Technologies Used](#technologies-used)
 - [Demo](#demo)
 - [How to Run the Project](#how-to-run)
@@ -35,13 +36,14 @@ The assistant returns answers **with source citations** and maintains **context*
 
 ---
 
-<a id="problem-statement"></a>
-## Problem Statement
+<a id="why-this-project"></a>
+## Why this project
 
-In many organizations, knowledge is scattered across multiple formats — PDF/TXT/MD, internal wikis, and emails.  
-Standard chatbots lack access to these sources, often providing shallow or hallucinated answers.  
+Internal documentation in most companies is a silent productivity sink: onboarding PDFs, policy docs, and process wikis live in five places at once, and a new hire spends their first month learning which one is current. Off-the-shelf chat assistants make it worse — they sound confident, don't cite their sources, and cheerfully hallucinate when asked about a policy they've never seen.
 
-A more intelligent **Company Knowledge Assistant** is needed — one that can answer user questions in natural language, **cite internal document sources**, and **maintain conversational context**.
+I built this project to exercise the full RAG stack end-to-end under one hard constraint: **the assistant must refuse to answer when the knowledge base doesn't support the question.** That rule drives every architectural choice below — the score-threshold retriever, the cite-or-admit prompt, and the session-memory rebuild for user uploads all exist because hallucination in a corporate knowledge tool is worse than saying "I don't know".
+
+A secondary goal was to ship this to Hugging Face Spaces on the free tier so reviewers and non-engineers can click the live demo without an API-key lottery. Most of the stack choices in the [Key architectural decisions](#key-decisions) section are downstream of that deployment constraint.
 
 ---
 
@@ -99,6 +101,57 @@ The resulting index is saved under:
 - `build_demo_index.py` – one-off script to build a demo index from `./assets/*` and save it to `./vectorstore/default_company`.
 
 - `app.py` – Streamlit app. Uses `build_embeddings()`, and for uploads builds a session-only index via `build_faiss_from_docs()`; for the prebuilt demo it loads via `load_faiss()`.
+
+---
+
+<a id="key-decisions"></a>
+## Key architectural decisions
+
+### ADR-1 — FAISS over Chroma / Qdrant for vector storage
+
+**Context:** single-process Streamlit app deployed to Hugging Face Spaces free tier — no sidecar services, ephemeral storage, cold starts measured in minutes when a model has to be re-downloaded.
+
+**Decision:** use FAISS persisted as two files (`index.faiss` + `index.pkl`, see `rag_index.py`) and commit a prebuilt demo index to the repo under `vectorstore/default_company/`.
+
+**Why not Chroma / Qdrant:** both shine when you need metadata filters, hybrid search, or multi-tenant isolation. For a single demo corpus loaded once, they add a service dependency (Chroma server process, Qdrant container) that breaks the free-tier deployment model. FAISS runs in-process and the prebuilt index ships with the repo, so first-load latency is deterministic.
+
+**Trade-off:** no server-side metadata filtering and no concurrent writes. A production tenant-per-workspace deployment would outgrow this quickly — a companion portfolio project (`invoice-processor`) uses Qdrant precisely because that use case needs it.
+
+---
+
+### ADR-2 — Similarity score threshold over fixed top-k
+
+**Context:** the assistant sits in front of a small, curated corpus. If the user asks a question the corpus doesn't cover (which they will), a plain top-k retriever still returns 4 weakly-related chunks and the LLM cheerfully writes an answer based on them.
+
+**Decision:** configure the retriever with `search_type="similarity_score_threshold"` and a sidebar-tunable threshold (default `0.35`, see `app.py`). When no chunk clears the threshold, the retriever returns `[]` and the QA system prompt instructs the LLM to respond *"I don't know"* rather than answer from context-less priors.
+
+**Why:** hallucination in a corporate knowledge tool is a trust-killer heavier than missed recall. Users learn to verify an assistant that sometimes says "I don't know"; they abandon one that confidently cites the wrong policy.
+
+**Trade-off:** valid questions phrased very differently from the source document can fall below the threshold. The sidebar slider lets power users loosen it for exploratory queries, and citations are always rendered so the user can verify the match.
+
+---
+
+### ADR-3 — Groq for LLM inference (not OpenAI, not local)
+
+**Context:** two constraints — (a) keep the Hugging Face Space runnable without users funding my OpenAI bill, (b) target conversational latency of roughly 2 seconds so the live demo stays interactive.
+
+**Decision:** use `ChatGroq` with three selectable models — `llama-3.1-8b-instant` (default, fastest), `llama-3.1-70b-versatile` (higher quality), and `mixtral-8x7b-32768` (long context). The user provides their own Groq API key via the sidebar.
+
+**Why not OpenAI:** free-tier-friendly demos break the moment the author stops paying. Groq's free tier is generous enough that a reviewer can register for a key and run the demo end-to-end in under a minute.
+
+**Why not local inference:** the HF Space free tier is CPU-only. A 4-bit quantized Llama 3.1 8B on CPU is well into double-digit seconds per response — slow enough that reviewers would close the tab before the first answer finished streaming.
+
+---
+
+### ADR-4 — Session-memory rebuild for user uploads (security posture)
+
+**Context:** `FAISS.load_local` requires `allow_dangerous_deserialization=True` because LangChain persists metadata via `pickle`. A pickle load is arbitrary code execution — fine for a file *I* produced, catastrophic for files uploaded by strangers on the internet.
+
+**Decision:** two strictly separated code paths (see `rag_index.py` and the `_build_index_from_uploads` helper in `app.py`):
+- **Prebuilt demo index** ships with the repo and loads via `load_faiss()` with the unsafe flag — safe because the index is produced by the same application that loads it.
+- **User uploads** go through `build_faiss_from_docs()`, which rebuilds the index in memory from the raw PDF/TXT/MD bytes and never touches the deserializer.
+
+**Why:** even for a personal portfolio demo, "upload anything → gets pickle-unmarshalled" is a footgun I wouldn't want a reviewer to find. Uploaded filenames are also stripped via `_safe_filename` to prevent path traversal. The cost is negligible — session indexes are small — and the security posture is the boring, correct one.
 
 ---
 
