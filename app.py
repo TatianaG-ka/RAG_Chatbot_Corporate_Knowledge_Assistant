@@ -14,13 +14,13 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_groq import ChatGroq
 
 from rag_index import (
-    HAS_MD,
     build_embeddings,
     build_faiss_from_docs,
-    ensure_demo_index_exists,
-    load_faiss,
     load_paths,
 )
+
+# Supported suffixes for the demo index — kept in sync with build_demo_index.py.
+_DEMO_ASSET_SUFFIXES = {".pdf", ".txt", ".md", ".markdown"}
 
 load_dotenv()
 HF_TOKEN = os.getenv("HF_TOKEN", "")
@@ -72,6 +72,30 @@ def get_embeddings():
 @st.cache_resource(show_spinner=False)
 def get_llm(api_key: str, model: str) -> ChatGroq:
     return ChatGroq(groq_api_key=api_key, model_name=model)
+
+
+@st.cache_resource(show_spinner="Building demo index from ./assets…")
+def get_demo_index(assets_dir: str, _emb):
+    """Rebuild the demo FAISS index from ./assets on every cold start.
+
+    We intentionally do not ship a pickled index in the repo. Pickle state
+    drifts across major dependency versions (e.g. pydantic v1 -> v2), and a
+    hosting-platform runtime bump silently breaks a previously-working index
+    with cryptic errors like ``KeyError: '__fields_set__'``. Rebuilding from
+    raw PDF/TXT/MD on cold start trades ~15-30s of first-load latency for
+    permanent compatibility across container upgrades.
+    """
+    asset_paths = [
+        p for p in Path(assets_dir).glob("*")
+        if p.suffix.lower() in _DEMO_ASSET_SUFFIXES
+    ]
+    if not asset_paths:
+        return None, 0, [f"No supported files in {assets_dir}/ (expected .pdf/.txt/.md)."]
+    docs, errors = load_paths(asset_paths)
+    if not docs:
+        return None, 0, errors
+    vs, n_chunks = build_faiss_from_docs(docs, _emb)
+    return vs, n_chunks, errors
 
 
 # --- helpers -------------------------------------------------------------
@@ -140,14 +164,14 @@ VS_KEY = "vs"
 VS_USER_KEY = "vs_user"
 
 if MODE_QUICK == mode:
-    err = ensure_demo_index_exists(persist_dir)
-    if err:
-        st.error(err)
+    vs, n_chunks, load_errors = get_demo_index("assets", embeddings)
+    for msg in load_errors:
+        st.warning(msg)
+    if vs is None:
+        st.error("No demo documents found in ./assets/ (expected .pdf/.txt/.md).")
         st.stop()
-    vs = load_faiss(persist_dir, embeddings)
     st.session_state[VS_KEY] = vs
-    st.success("Prebuilt index loaded.")
-    st.caption(f"Path: {persist_dir}")
+    st.success(f"Demo index built from ./assets/ ({n_chunks} chunks).")
 
     cols = st.columns(3)
     examples = [
