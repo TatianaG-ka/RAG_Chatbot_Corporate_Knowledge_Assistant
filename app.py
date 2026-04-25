@@ -1,4 +1,5 @@
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, List
 
@@ -119,31 +120,42 @@ def _format_citations(context_docs: List[Document]) -> List[str]:
     return out
 
 
-def _save_uploads_to_tmp(files: List[Any]) -> List[Path]:
-    tmp_dir = Path("tmp")
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    saved: List[Path] = []
-    for up in files or []:
-        safe_name = _safe_filename(up.name)
-        if not safe_name:
-            st.error(f"Rejected upload with invalid name: {up.name!r}")
-            continue
-        target = tmp_dir / safe_name
-        try:
-            with open(target, "wb") as f:
-                f.write(up.getbuffer())
-            saved.append(target)
-        except OSError as e:
-            st.error(f"Write error {safe_name}: {e}")
-    return saved
-
-
 def _build_index_from_uploads(files: List[Any], emb):
-    paths = _save_uploads_to_tmp(files)
-    if not paths:
+    """Build FAISS from session uploads using a per-call temp dir.
+
+    Files live only long enough for the document loaders to read them
+    into memory; the ``TemporaryDirectory`` cleans up automatically
+    once the with-block exits. Avoids a hardcoded ``tmp/`` collision
+    across concurrent Space sessions and leaves no upload bytes on
+    disk between rebuilds.
+
+    Path-traversal protection (``_safe_filename``) and ``OSError``
+    handling are preserved from the previous on-disk helper.
+    """
+    if not files:
         st.warning("No files to load.")
         return None, 0
-    docs, errors = load_paths(paths)
+    with tempfile.TemporaryDirectory(prefix="rag_uploads_") as tmp:
+        tmp_dir = Path(tmp)
+        paths: List[Path] = []
+        for up in files:
+            safe_name = _safe_filename(up.name)
+            if not safe_name:
+                st.error(f"Rejected upload with invalid name: {up.name!r}")
+                continue
+            target = tmp_dir / safe_name
+            try:
+                target.write_bytes(up.getbuffer())
+                paths.append(target)
+            except OSError as e:
+                st.error(f"Write error {safe_name}: {e}")
+        if not paths:
+            st.warning("No files to load.")
+            return None, 0
+        # Loaders must finish reading before we drop out of the
+        # with-block — they hold no file handles across the call,
+        # but the file itself disappears on cleanup.
+        docs, errors = load_paths(paths)
     for err in errors:
         st.warning(err)
     if not docs:
