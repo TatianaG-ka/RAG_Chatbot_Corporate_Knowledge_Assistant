@@ -12,7 +12,6 @@ pinned: false
 # Project 1 – Company Knowledge Assistant — RAG (PDF/TXT/MD) Demo  
 **ChatGroq + FAISS + Citations**
 
-Each project follows the same consistent format: **overview → tech stack→ architecture → demo → how to run the Project → Screenshots**.
 ---
 <a id="toc"></a>
 ## Table of Contents
@@ -219,7 +218,7 @@ If you prefer to run the project locally:
 `git clone https://github.com/TatianaG-ka/RAG_Chatbot_Corporate_Knowledge_Assistant`
 
 2. Navigate to the project directory
-`cd RAG_Chatbot-Corporate_Knowledge_Assistant`
+`cd RAG_Chatbot_Corporate_Knowledge_Assistant`
 
 3. Install dependencies
 `pip install -r requirements.txt`
