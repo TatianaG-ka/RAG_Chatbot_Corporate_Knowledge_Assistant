@@ -51,8 +51,8 @@ GROQ_ENV = os.getenv("GROQ_API_KEY", "")
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
 
-st.set_page_config(page_title="Asystent Wiedzy BGK — RAG demo", layout="wide")
-st.title("Asystent Wiedzy BGK — RAG z cytowaniem źródeł (demo)")
+st.set_page_config(page_title="Asystent Wiedzy BRH — RAG demo", layout="wide")
+st.title("Asystent Wiedzy BRH — RAG z cytowaniem źródeł (demo)")
 
 # --- sidebar -------------------------------------------------------------
 with st.sidebar:
@@ -196,16 +196,17 @@ def _build_index_from_uploads(files: List[Any], emb):
 MODE_QUICK = "Quick demo (gotowy indeks)"
 MODE_UPLOAD = "Wgraj pliki (sesyjnie)"
 
-# Demo questions rehearsed for the BGK presentation (docs/DEMO_RAG_dokumenty_BGK.md).
-# Q5 is the deliberate refuse-on-no-context trap — kept neutral so it reads like a
-# normal question; the system must answer „Nie wiem” because the corpus is for MŚP,
-# not consumer mortgages.
+# Demo questions rehearsed for the presentation (docs/pytanie_prawne/00_Przewodnik_DEMO_RAG_BRH.md).
+# Corpus is a FICTIONAL development bank (Bank Rozwoju Horyzont / BRH) — built from scratch to
+# avoid using any real institution's copyrighted documents. Q5 is the deliberate
+# refuse-on-no-context trap: BRH has no deposit products, so „oprocentowanie lokaty" must yield
+# „Nie wiem” (here it's threshold-based — the term is genuinely out-of-corpus, scores ~0).
 DEMO_QUESTIONS = [
-    "Jaka jest minimalna kwota Pożyczki na cyfryzację i kto może wnioskować?",
-    "Do jakiej części kredytu sięga gwarancja de minimis?",
-    "Co finansuje gwarancja Biznesmax, a co gwarancja Ekomax?",
-    "Jaki jest okres gwarancji dla kredytu inwestycyjnego de minimis?",
-    "Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?",
+    "Jaka jest minimalna i maksymalna kwota Pożyczki?",
+    "Do jakiej części kredytu sięga gwarancja de minimis „Rozwój”?",
+    "Co finansuje gwarancja „EkoHoryzont”, a co gwarancja de minimis „Rozwój”?",
+    "Czy BRH pozwala na w pełni automatyczną decyzję kredytową AI?",
+    "Jakie jest oprocentowanie lokaty terminowej w BRH?",
 ]
 
 mode = st.radio("Tryb:", [MODE_QUICK, MODE_UPLOAD], horizontal=True)
@@ -288,8 +289,8 @@ contextualize_q_prompt = ChatPromptTemplate.from_messages(
 )
 
 qa_system_prompt = (
-    "Jesteś asystentem, który odpowiada na pytania na podstawie bazy wiedzy BGK "
-    "(publiczne dokumenty Banku Gospodarstwa Krajowego).\n"
+    "Jesteś asystentem, który odpowiada na pytania na podstawie bazy wiedzy "
+    "Banku Rozwoju Horyzont S.A. (BRH) — fikcyjnego banku rozwoju (dokumenty demonstracyjne).\n"
     "Korzystaj WYŁĄCZNIE z podanego poniżej kontekstu. Jeśli odpowiedzi nie ma w kontekście, "
     "napisz dokładnie: „Nie wiem — brak podstawy w dokumentach.” i nie dodawaj nic więcej.\n"
     "Nie zgaduj i nie korzystaj z wiedzy spoza kontekstu. Odpowiadaj po polsku.\n\n"

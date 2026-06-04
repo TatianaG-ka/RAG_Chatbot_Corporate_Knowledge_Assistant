@@ -14,23 +14,34 @@ Stack: **Streamlit + LangChain + FAISS (in-memory) + HuggingFace embeddings + Ch
 Live Space: `TatianaGol/RAG_Chatbot-Corporate_Knowledge_Assistant`
 (synced automatically from `main` via `.github/workflows/main.yml`).
 
-## Current goal — BGK pivot (recruitment demo)
+## Current goal — recruitment demo ("Asystent Wiedzy BRH")
 
 This repo is the **flagship portfolio project** for an application to
-**"Menedżer ds. AI" at Bank Gospodarstwa Krajowego (BGK)**. The job posting is in
-`docs/ogloszemia_stanowiska/`.
+**"Menedżer ds. AI" at Bank Gospodarstwa Krajowego (BGK)** — that is the *employer* we
+are applying to. The job posting is in `docs/ogloszemia_stanowiska/`.
 
-We are pivoting the demo from a generic English corpus to an **"Asystent Wiedzy BGK"**
-built on **public BGK documents** (bgk.pl). The spec is in
-`docs/DEMO_RAG_dokumenty_BGK.md` — read it before touching the corpus or demo questions.
+The demo corpus is a **fully fictional development bank — Bank Rozwoju Horyzont S.A.
+(BRH)** — built from scratch (7 markdown documents in `assets/`). The spec + rehearsed
+demo questions are in `docs/pytanie_prawne/00_Przewodnik_DEMO_RAG_BRH.md` — read it before
+touching the corpus or demo questions.
 
-Why this pivot maps to the job:
+**Why fictional, not real BGK documents (decided 2026-06-04):** "public" ≠ "free to reuse".
+Real BGK docs are copyright-protected works, their name/logo are trademarks, and building a
+public product on them — then showing it to BGK at the interview — is the *wrong* signal for a
+compliance/AI-governance role (it reads as careless with others' IP/data). A self-authored
+fictional corpus demonstrates the **identical** skills (chunking, retrieval, citations,
+refuse-on-no-context) with zero legal/brand risk, and the deliberate choice itself is an
+asset on the interview. The full legal reasoning + the BRH source docs are in
+`docs/pytanie_prawne/`.
+
+Why the demo maps to the job:
 - **AI Act / RODO awareness** → the refuse-on-no-context rule = compliance-grade, trustworthy AI for a regulated bank.
 - **Answering supervisory bodies (KNF, UODO)** → citations + debug panel = auditability.
+- **Respecting IP/data** → using a fictional corpus instead of a real institution's documents.
 - **Translating business needs to tech** → the whole demo, presented simply for non-technical reviewers.
 
-The earlier (now superseded) plan — a generic synthetic corpus — is archived in
-`docs/wczesniej/`. The BGK corpus replaces it.
+Superseded earlier plans are archived in `docs/wczesniej/` (generic English corpus) and
+`docs/DEMO_RAG_dokumenty_BGK.md` (the BGK-document approach we deliberately dropped for the reasons above).
 
 ## Commands
 
@@ -67,11 +78,13 @@ only when the key is *not* already in the environment). Embeddings run locally (
   `create_history_aware_retriever`/`create_stuff_documents_chain`/`create_retrieval_chain`/
   `RunnableWithMessageHistory` chain was removed so every stage is observable.
 - **`build_demo_index.py`** — offline index builder (CLI).
-- **`assets/`** — the demo corpus: **6 public BGK PDFs** (de minimis, FENG Biznesmax Plus,
-  FENG criteria guide, Pożyczka na cyfryzację rules + RODO, Strategia BGK 2025-2030). The old
-  generic English files are archived under `docs/wczesniej/old_assets_generic/`.
+- **`assets/`** — the demo corpus: **7 fictional BRH markdown docs** (Pożyczka na Cyfryzację i AI
+  regulamin, gwarancja de minimis „Rozwój", gwarancja „EkoHoryzont", procedura obsługi wniosku,
+  klauzula RODO, polityka odpowiedzialnego AI, skrót strategii 2030). All self-authored (`Bank
+  Rozwoju Horyzont S.A.`) — see `docs/pytanie_prawne/`. Earlier corpora archived under
+  `docs/wczesniej/old_assets_generic/` (generic EN) and `docs/wczesniej/` (BGK PDFs, dropped).
 - **`_diag_step0.py`** — committed diagnostic that justified the embedding-model choice (compares
-  3 models on the BGK corpus). Evidence/audit trail, not part of the runtime path.
+  3 models on a Polish corpus). Evidence/audit trail, not part of the runtime path.
 - **`vectorstore/default_company/`** — gitignored; rebuilt at cold start.
 
 ### Key design decisions (see README ADRs)
@@ -84,17 +97,18 @@ only when the key is *not* already in the environment). Embeddings run locally (
   so the debug panel matches what the LLM gets). Up to `CONTEXT_K=8` chunks above the sidebar
   threshold (default 0.35) reach the LLM; when nothing clears it the app answers
   „Nie wiem — brak podstawy w dokumentach." **without calling the LLM**.
-- **Per-document cap (`MAX_PER_DOC=4`).** Caps how many chunks one PDF contributes so a large
-  source can't fill the whole context, while still allowing a single authoritative PDF to answer
-  a single-source question (the „minimalna kwota Pożyczki" answer is the 4th-best chunk *within
-  its own PDF*, so the cap had to allow 4).
-- **Retrieval budgets are tuned to the 600/120 chunking (resolved Faza 6, 2026-06-04).** Smaller
-  chunks concentrate a single fact (good for recall) but push the answer-bearing chunk deeper in
-  the ranking and let a fact-rich source contribute several near-tied chunks — so the old 8/4/2
-  budgets (tuned for 1200-char chunks) starved questions like Q1/Q4. Measured offline across all
-  5 demo questions: 12/8/4 surfaces every demo fact (Q1 „5 mln", Q2 „60%", Q3 innowacje+energia,
-  Q4 „120 mies."), and the 0.35 threshold still rejects out-of-corpus queries. **Threshold was NOT
-  lowered**: 0.30 let „przepis na sernik" leak (relevance 0.312 — „przepis"=regulacja collision).
+- **Per-document cap (`MAX_PER_DOC=4`).** Caps how many chunks one document contributes so a large
+  source can't fill the whole context, while still allowing a single authoritative doc to answer a
+  single-source question.
+- **Retrieval budgets `RETRIEVAL_K=12 / CONTEXT_K=8 / MAX_PER_DOC=4` with 600/120 chunking.**
+  Re-validated offline on the BRH corpus (`docs/testowanie_rag/_WALIDACJA_BRH.txt`): all 5 demo
+  facts reach context (Q1 „500 000/10 000 000", Q2 „60%/3,5 mln", Q3 „80% + 60%", Q4 „człowiek
+  decyduje"), the Q5 trap („oprocentowanie lokaty") and other out-of-corpus queries score below the
+  0.35 threshold → clean refusal. **Threshold stays 0.35** (the budgets/chunking carry recall, not a
+  lower threshold). Phrasing matters: a question that repeats the *program name* („…Pożyczki na
+  Cyfryzację i AI") pulls the match toward title/intro chunks, so Q1 is phrased plainly („…kwota
+  Pożyczki?") to surface the §4 amounts chunk; Q3 uses „Co finansuje X, a co Y" to pull both
+  guarantee docs. Re-run the validation after any corpus edit.
 - **Citations are deterministic.** Built by `_format_citations()` from the chunks actually fed to
   the LLM (not from the model's output). The LLM is NOT asked to produce citations (it mangles
   filenames). Core to the auditability story.
@@ -108,26 +122,26 @@ only when the key is *not* already in the environment). Embeddings run locally (
   e5-base ranks slightly better but compresses relevance scores to ~0.65–0.83 so the threshold can't
   reject out-of-corpus queries ("stolica Mongolii" → 0.72); paraphrase-multilingual gives clean
   separation (out-of-corpus relevance ~0), which the honest-refusal demo relies on.
-- **PDFs must be text-based, not scanned.** `PyPDFLoader` extracts no text from scanned/image
-  PDFs (no OCR in the stack). All 6 current BGK PDFs were verified text-based (Faza 1).
+- **Corpus is markdown (`.md`) loaded via `UnstructuredMarkdownLoader`** (`unstructured` is in
+  `requirements.txt`). If a future corpus uses PDFs, they must be text-based, not scanned —
+  `PyPDFLoader` has no OCR.
 - **Prompts + UI are Polish (resolved Faza 3/5).** `qa_system_prompt`, `contextualize_q_system_prompt`,
   the refusal („Nie wiem — brak podstawy w dokumentach."), and all user-facing chrome are Polish.
   Code/docstrings/comments stay English (convention).
 - **Polish strings: never use an ASCII `"` to close a `„` quote** — it terminates the Python string
   literal mid-sentence. Use the typographic `”` (U+201D). This bug bit us 3× during the pivot; a
   passing `compileall` catches the hard crash but always eyeball quotes in edited Polish strings.
-- **de minimis: 60% vs 80%.** The demo doc warns the BGK mockup slide says "80%" but de minimis
-  is **60%** (80% is Biznesmax/Ekomax). The corpus says 60%; the retrieval budgets ensure that
-  source reaches context (verified offline: „60%" is in Q2's context). **Still verify the live
-  LLM answer says 60% (needs GROQ_API_KEY).**
-- **Q3 demo question rephrased (Faza 6).** „Czym różni się Biznesmax od Ekomax?" surfaced only
-  one (definitional) chunk above threshold — too thin for a comparison. Changed to **„Co finansuje
-  gwarancja Biznesmax, a co gwarancja Ekomax?"** (in `app.py:DEMO_QUESTIONS` and
-  `docs/DEMO_RAG_dokumenty_BGK.md`), which retrieves 8 chunks covering both the innovation and the
-  energy-efficiency side. Keep the two in sync.
+- **BRH facts are internally consistent (by design).** de minimis „Rozwój" = **60%** / max 3,5 mln zł;
+  „EkoHoryzont" = **80%** / efektywność energetyczna; Pożyczka = 500 000–10 000 000 zł; Polityka AI =
+  człowiek decyduje (no fully-automated credit decisions). Numbers are consistent across files so no
+  contradiction surfaces live. **Still verify the live LLM answers (needs GROQ_API_KEY).**
+- **Demo questions are phrased for retrieval (see budgets above).** Q1 „…kwota Pożyczki?" (not „…na
+  Cyfryzację i AI"), Q3 „Co finansuje EkoHoryzont, a co de minimis Rozwój?". `app.py:DEMO_QUESTIONS`
+  and `docs/pytanie_prawne/00_Przewodnik_DEMO_RAG_BRH.md` should stay in sync.
 - **Live-validation gap.** Retrieval is verified offline, but the LLM path needs `GROQ_API_KEY`.
-  Before the demo, `streamlit run app.py` and confirm Q2 answers 60% and Q5 (kredyt hipoteczny)
-  refuses — Q5 scores ABOVE threshold so the refusal must come from the prompt, not the threshold.
+  Before the demo, `streamlit run app.py` and confirm Q2 answers 60%, Q4 says „człowiek decyduje",
+  and Q5 (oprocentowanie lokaty) refuses — Q5 is a clean threshold refusal (out-of-corpus, no
+  deposit products in the corpus).
 - **HF Space deploy.** Pushing to `main` triggers `.github/workflows/main.yml`: a smoke job
   (deps + `compileall` + import) gates a force-push to the Space. Expect 5–15 min rebuild.
 - **Binaries in `assets/` MUST be LFS-tracked before committing (resolved Faza 6 deploy).** The HF
@@ -135,11 +149,12 @@ only when the key is *not* already in the environment). Embeddings run locally (
   contains binary files… use xet"). `.gitattributes` LFS-tracks `*.png` and `*.pdf`; any new binary
   type (e.g. `*.docx`) must be added there *before* the commit. If a binary already slipped in as a
   raw blob, fix with `git lfs migrate import --include="*.ext"` (rewrites history → force-push). This
-  bit the first deploy: the 6 BGK PDFs were committed as raw blobs and HF rejected the sync.
+  bit the first deploy: PDFs were committed as raw blobs and HF rejected the sync. (The current BRH
+  corpus is markdown, so this is less of a risk now — but the rule stands for any future binary.)
 
 ## Conventions
 
-- Code and README are in **English**; the BGK demo corpus and demo questions are in **Polish**.
+- Code and README are in **English**; the BRH demo corpus and demo questions are in **Polish**.
 - Keep `rag_index.py` free of Streamlit imports (testability boundary).
 - `_DEMO_ASSET_SUFFIXES` in `app.py` and `SUPPORTED_SUFFIXES` in `build_demo_index.py`
   must stay in sync.

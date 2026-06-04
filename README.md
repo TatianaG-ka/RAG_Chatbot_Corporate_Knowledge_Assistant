@@ -33,7 +33,7 @@ pinned: false
 This project implements a **Retrieval-Augmented Generation (RAG)** chatbot that enables users to query a document corpus (PDF/TXT/MD) in natural language.
 The assistant returns answers **with source citations**, maintains **conversational context**, and — critically — **refuses to answer when the corpus doesn't support the question** (no hallucination).
 
-The live demo (*„Asystent Wiedzy BGK"*) runs on a small corpus of **public Bank Gospodarstwa Krajowego documents** (bgk.pl): de minimis / FENG Biznesmax Plus / Ekomax guarantees, the "Pożyczka na cyfryzację" rules, and the BGK 2025–2030 strategy. Nothing confidential — the same pipeline runs identically on private documents in a real tenant.
+The live demo (*„Asystent Wiedzy BRH"*) runs on a small corpus of **fully fictional documents I authored** for an invented development bank — *Bank Rozwoju Horyzont S.A. (BRH)*: a digitization-loan program, two guarantee products (de minimis „Rozwój" and the green „EkoHoryzont"), an application-handling procedure, a RODO notice, a responsible-AI policy, and a strategy summary. The corpus is deliberately fictional — building a public demo on a real institution's copyrighted documents would be the wrong choice for a compliance-focused tool, so the same pipeline is demonstrated on a corpus I own. It runs identically on a tenant's private documents.
 
 ---
 
@@ -170,9 +170,9 @@ Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. 
 
 ### ADR-5 — Multilingual embeddings chosen for clean out-of-corpus separation
 
-**Context:** the corpus pivoted to **public Polish-language BGK documents**. The original `sentence-transformers/all-MiniLM-L6-v2` is English-only and ranked Polish chunks poorly.
+**Context:** the corpus is **Polish-language**. The original `sentence-transformers/all-MiniLM-L6-v2` is English-only and ranked Polish chunks poorly.
 
-**Decision:** use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` with `normalize_embeddings=True` (see `rag_index.py:EMB_MODEL`). The choice is data-driven — `_diag_step0.py` compares three models on the BGK corpus and is committed as an audit trail.
+**Decision:** use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` with `normalize_embeddings=True` (see `rag_index.py:EMB_MODEL`). The choice is data-driven — `_diag_step0.py` compares three models on a Polish corpus and is committed as an audit trail.
 
 **Why not e5-base:** it ranks chunks slightly better, but compresses all relevance scores into ~0.65–0.83 — so an out-of-corpus query ("stolica Mongolii") still scores ~0.72 and a fixed threshold can't reject it. `paraphrase-multilingual` gives clean separation (out-of-corpus relevance ≈ 0), which the entire honest-refusal demo ([ADR-2](#key-decisions)) depends on.
 
@@ -182,13 +182,13 @@ Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. 
 
 ### ADR-6 — Chunk size 600 and retrieval budgets tuned to the corpus
 
-**Context:** with 1200-char chunks, a one-line fact (e.g. *"Minimalna wartość udzielonej Pożyczki wynosi 5 mln zł"*) was ~8% of a chunk packed with ~12 unrelated legal clauses. Its averaged embedding was dominated by the surrounding text, so the answer-bearing chunk never reached the top of the ranking and the assistant wrongly answered *"brak informacji"* — a recall failure, not hallucination.
+**Context:** a one-line fact (e.g. *"Minimalna kwota Pożyczki wynosi 500 000 zł"*) sits in a paragraph alongside several unrelated clauses. With large chunks its averaged embedding is dominated by the surrounding text, so the answer-bearing chunk can fall below the relevance threshold and the assistant wrongly answers *"brak informacji"* — a recall failure, not hallucination.
 
-**Decision:** halve the chunking to `CHUNK_SIZE=600 / CHUNK_OVERLAP=120` (`rag_index.py`) and widen the retrieval budgets to `RETRIEVAL_K=12 / CONTEXT_K=8 / MAX_PER_DOC=4` (`app.py`). Smaller chunks are topically focused so a single fact surfaces; wider budgets let the answer chunk reach the LLM even when it ranks behind near-tied chunks or chunks from a different document.
+**Decision:** `CHUNK_SIZE=600 / CHUNK_OVERLAP=120` (`rag_index.py`) with retrieval budgets `RETRIEVAL_K=12 / CONTEXT_K=8 / MAX_PER_DOC=4` (`app.py`). Smaller chunks are topically focused so a single fact surfaces; the budgets let the answer chunk reach the LLM even when it ranks behind near-tied chunks or chunks from another document.
 
-**Why these numbers:** measured offline against all five rehearsed demo questions. The "minimalna kwota" answer is the **4th-best chunk within its own PDF** (so `MAX_PER_DOC` had to allow 4); the de minimis "120 miesięcy" chunk ranks **~8th overall**, behind FENG chunks that also discuss guarantee periods (so `CONTEXT_K`/`RETRIEVAL_K` had to widen). All five facts land in context with these budgets, while the `0.35` threshold still cleanly rejects out-of-corpus queries.
+**Why these numbers:** measured offline against all five rehearsed demo questions (`docs/testowanie_rag/_WALIDACJA_BRH.txt`) — every fact lands in context (loan min/max amounts, de minimis 60% / 3.5 M zł, the EkoHoryzont-vs-Rozwój contrast, the human-in-the-loop AI rule), while the `0.35` threshold cleanly refuses the deposit-rate trap and other out-of-corpus queries. Question *phrasing* also matters: a query that repeats the program name ("…Pożyczki na Cyfryzację i AI") pulls the match toward title/intro chunks, so the amount question is phrased plainly ("…kwota Pożyczki?") to surface the right paragraph.
 
-**Trade-off:** the threshold was deliberately **not** lowered to improve recall further — at `0.30`, an out-of-corpus query like "przepis na sernik" leaks in at relevance `0.312` (the Polish word *przepis* collides with *przepisy* = regulations, which pervade the corpus). Recall is bought with chunking and budgets, not by weakening the refusal guarantee.
+**Trade-off:** the threshold is deliberately kept at `0.35` rather than lowered for extra recall — recall is bought with chunking, budgets, and phrasing, not by weakening the refusal guarantee. (On an earlier PDF corpus, lowering to `0.30` let an out-of-corpus "przepis na sernik" leak in at `0.312`, because the Polish *przepis* collides with *przepisy* = regulations.)
 
 ---
 
@@ -227,19 +227,18 @@ No installation required — just open the demo link below:
 
 Steps:
 1. Open the Hugging Face Space.  
-2. (Quick demo) rebuilds an index **in memory** from the public BGK documents in `/assets`.
+2. (Quick demo) rebuilds an index **in memory** from the fictional BRH documents in `/assets`.
    (Upload) lets you upload your own files (PDF/TXT/MD) and build an index **in session memory**. 
-3. The Quick demo corpus (`/assets`) is six public BGK PDFs:  
-   - `Gwarancja_de_minimis_warunki_od_2026-04-16.pdf`  
-   - `Gwarancja_FENG_Biznesmax_Plus_warunki.pdf`  
-   - `Gwarancja_FENG_przewodnik_po_kryteriach.pdf`  
-   - `Pozyczka_na_cyfryzacje_zasady_naboru.pdf` / `Pozyczka_na_cyfryzacje_klauzula_RODO.pdf`  
-   - `Strategia_BGK_2025-2030.pdf`  
+3. The Quick demo corpus (`/assets`) is seven fictional Bank Rozwoju Horyzont (BRH) markdown docs:  
+   - `BRH_Regulamin_Pozyczka_Cyfryzacja_AI.md`  
+   - `BRH_Warunki_Gwarancja_de_minimis_Rozwoj.md` / `BRH_Gwarancja_EkoHoryzont.md`  
+   - `BRH_Procedura_obslugi_wniosku.md` / `BRH_Klauzula_informacyjna_RODO.md`  
+   - `BRH_Polityka_odpowiedzialnego_AI.md` / `BRH_Strategia_2030_skrot.md`  
 4. Ask a question in natural language (the demo ships five rehearsed Polish questions as buttons):  
-   - „Jaka jest minimalna kwota Pożyczki na cyfryzację i kto może wnioskować?"  
-   - „Do jakiej części kredytu sięga gwarancja de minimis?"  
-   - „Co finansuje gwarancja Biznesmax, a co gwarancja Ekomax?"  
-   - **(refuse-on-no-context trap)** „Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?" → *„Nie wiem — brak podstawy w dokumentach."*  
+   - „Jaka jest minimalna i maksymalna kwota Pożyczki?"  
+   - „Do jakiej części kredytu sięga gwarancja de minimis „Rozwój”?"  
+   - „Czy BRH pozwala na w pełni automatyczną decyzję kredytową AI?" → *„Nie — decyduje człowiek"*  
+   - **(refuse-on-no-context trap)** „Jakie jest oprocentowanie lokaty terminowej w BRH?" → *„Nie wiem — brak podstawy w dokumentach."* (BRH has no deposit products)  
 5. View AI-generated responses with **citations**, or the deterministic refusal when the corpus doesn't cover the question.
 
 > A `GROQ_API_KEY` is required for the LLM step (sidebar, or an env/Space secret). Embeddings run locally on CPU — no key needed.
@@ -271,30 +270,17 @@ If you prefer to run the project locally:
 `http://localhost:8501`
 
 7. Example queries (Quick demo corpus):
-- „Jaki jest okres gwarancji dla kredytu inwestycyjnego de minimis?"
-- „Do jakiej części kredytu sięga gwarancja de minimis?"
-- „Co finansuje gwarancja Biznesmax, a co gwarancja Ekomax?"
+- „Jaka jest minimalna i maksymalna kwota Pożyczki?"
+- „Do jakiej części kredytu sięga gwarancja de minimis „Rozwój”?"
+- „Co finansuje gwarancja „EkoHoryzont”, a co gwarancja de minimis „Rozwój”?"
 
 ---
 <a id="screenshots"></a>
 ### Screenshots
 
-*„Asystent Wiedzy BGK" — public BGK documents, Polish demo questions, source citations and honest refusal.*
+*„Asystent Wiedzy BRH" — fictional Bank Rozwoju Horyzont corpus, Polish demo questions, source citations and honest refusal.*
 
-**Landing — Quick demo index + the five rehearsed questions (GROQ key supplied via server config):**
-![](./screenshots/demo_new_1.png)  
-
-**Refuse-on-no-context trap — „Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?" → „Nie wiem — brak podstawy w dokumentach.":**
-![](./screenshots/demo_new_2.png)  
-
-**Grounded answer with citations — „minimalna kwota Pożyczki" → 5 mln zł, and an honest „no info" on the part the corpus doesn't cover:**
-![](./screenshots/demo_new_3.png)  
-
-**Debug panel — per-chunk relevance/L2 scores, which chunks reached the LLM, and stage latencies:**
-![](./screenshots/demo_new_4.png)  
-
-**Comparison answer — „Co finansuje gwarancja Biznesmax, a co Ekomax?" with sources:**
-![](./screenshots/demo_new_5.png)  
+> Screenshots to be regenerated from the live BRH demo (the earlier BGK-branded screenshots were removed in the BRH switch).
 
 
 ### License
