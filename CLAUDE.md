@@ -55,13 +55,22 @@ Requires `GROQ_API_KEY` (entered in the sidebar or via `.env`). Embeddings run l
 
 - **`rag_index.py`** — pure RAG plumbing (no Streamlit). Document loading (PDF/TXT/MD),
   chunking (`RecursiveCharacterTextSplitter`, size 1200 / overlap 200), FAISS build/save/load,
-  embeddings factory. Reusable, unit-testable.
-- **`app.py`** — Streamlit UI + the LangChain retrieval chain
-  (`create_history_aware_retriever` → `create_stuff_documents_chain` →
-  `create_retrieval_chain`, wrapped in `RunnableWithMessageHistory` for chat memory).
+  embeddings factory, and the scored-retrieval helpers `retrieve_scored()` (top-k with 0-1
+  relevance + raw L2, single embedding pass) and `select_context()` (threshold filter +
+  per-document cap). Reusable, unit-testable.
+- **`app.py`** — Streamlit UI + a **manual RAG pipeline** (since Faza 4): history-aware query
+  rewrite (only when prior turns exist) → `retrieve_scored` → `select_context` (threshold +
+  `MAX_PER_DOC`) → honest-refusal short-circuit (skips the LLM) → manual stuff + `qa_prompt | llm`
+  → answer + deterministic citations + a Debug panel. Chat memory is managed manually via
+  `ChatMessageHistory` (read a snapshot before the turn, append user+AI after). The old opaque
+  `create_history_aware_retriever`/`create_stuff_documents_chain`/`create_retrieval_chain`/
+  `RunnableWithMessageHistory` chain was removed so every stage is observable.
 - **`build_demo_index.py`** — offline index builder (CLI).
-- **`assets/`** — the demo corpus. Currently generic English (`policy.md`, `faq.txt`,
-  `manual.pdf`) — to be replaced with BGK PDFs.
+- **`assets/`** — the demo corpus: **6 public BGK PDFs** (de minimis, FENG Biznesmax Plus,
+  FENG criteria guide, Pożyczka na cyfryzację rules + RODO, Strategia BGK 2025-2030). The old
+  generic English files are archived under `docs/wczesniej/old_assets_generic/`.
+- **`_diag_step0.py`** — committed diagnostic that justified the embedding-model choice (compares
+  3 models on the BGK corpus). Evidence/audit trail, not part of the runtime path.
 - **`vectorstore/default_company/`** — gitignored; rebuilt at cold start.
 
 ### Key design decisions (see README ADRs)
@@ -69,9 +78,19 @@ Requires `GROQ_API_KEY` (entered in the sidebar or via `.env`). Embeddings run l
   cold start (`get_demo_index`, cached for container lifetime). Pickle drifts across major
   dep versions and silently breaks on platform runtime bumps. ~15–30s first-load latency is
   the deliberate trade for permanent compatibility.
-- **Honest retrieval.** Retriever uses `similarity_score_threshold` (k=4, threshold from
-  sidebar slider, default 0.35). When nothing clears the threshold it returns `[]` and the
-  LLM answers "I don't know" instead of hallucinating.
+- **Honest retrieval.** `RETRIEVAL_K=8` chunks are scored; relevance comes from the vectorstore's
+  own `_select_relevance_score_fn` (the same value a `similarity_score_threshold` retriever uses,
+  so the debug panel matches what the LLM gets). Up to `CONTEXT_K=4` chunks above the sidebar
+  threshold (default 0.35) reach the LLM; when nothing clears it the app answers
+  „Nie wiem — brak podstawy w dokumentach." **without calling the LLM**.
+- **Per-document cap (`MAX_PER_DOC=2`).** One large PDF (the 36-page FENG/Biznesmax doc is ~30%
+  of the corpus) otherwise monopolizes the top-k with near-duplicate chunks. The cap forces a
+  smaller authoritative source into context — concretely it fixes the **de minimis trap**: the
+  "gwarancja de minimis" question used to fill its top-4 entirely from the FENG doc (80%) and
+  never reach the dedicated de minimis doc (60%).
+- **Citations are deterministic.** Built by `_format_citations()` from the chunks actually fed to
+  the LLM (not from the model's output). The LLM is NOT asked to produce citations (it mangles
+  filenames). Core to the auditability story.
 - **Uploads never trust disk pickles** — rebuilt in-memory from a `TemporaryDirectory`.
 
 ## Gotchas / things to verify
@@ -83,11 +102,19 @@ Requires `GROQ_API_KEY` (entered in the sidebar or via `.env`). Embeddings run l
   reject out-of-corpus queries ("stolica Mongolii" → 0.72); paraphrase-multilingual gives clean
   separation (out-of-corpus relevance ~0), which the honest-refusal demo relies on.
 - **PDFs must be text-based, not scanned.** `PyPDFLoader` extracts no text from scanned/image
-  PDFs (no OCR in the stack). Verify each downloaded BGK PDF actually yields text.
-- **`qa_system_prompt` is English** (`app.py`). For a Polish demo, switch the prompt (and
-  the "I don't know" wording) to Polish so answers and the refusal read naturally.
+  PDFs (no OCR in the stack). All 6 current BGK PDFs were verified text-based (Faza 1).
+- **Prompts + UI are Polish (resolved Faza 3/5).** `qa_system_prompt`, `contextualize_q_system_prompt`,
+  the refusal („Nie wiem — brak podstawy w dokumentach."), and all user-facing chrome are Polish.
+  Code/docstrings/comments stay English (convention).
+- **Polish strings: never use an ASCII `"` to close a `„` quote** — it terminates the Python string
+  literal mid-sentence. Use the typographic `”` (U+201D). This bug bit us 3× during the pivot; a
+  passing `compileall` catches the hard crash but always eyeball quotes in edited Polish strings.
 - **de minimis: 60% vs 80%.** The demo doc warns the BGK mockup slide says "80%" but de minimis
-  is **60%** (80% is Biznesmax/Ekomax). Make sure the corpus + live answers say 60%.
+  is **60%** (80% is Biznesmax/Ekomax). The corpus says 60%; the per-doc cap ensures that source
+  reaches context. **Still verify the live LLM answer says 60% (needs GROQ_API_KEY).**
+- **Live-validation gap.** Retrieval is verified offline, but the LLM path needs `GROQ_API_KEY`.
+  Before the demo, `streamlit run app.py` and confirm Q2 answers 60% and Q5 (kredyt hipoteczny)
+  refuses — Q5 scores ABOVE threshold so the refusal must come from the prompt, not the threshold.
 - **HF Space deploy.** Pushing to `main` force-pushes to the Space. Expect 5–15 min rebuild;
   watch for pickle/runtime incompatibilities. Don't deploy untested.
 
