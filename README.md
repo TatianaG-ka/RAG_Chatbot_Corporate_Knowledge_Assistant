@@ -279,11 +279,22 @@ If you prefer to run the project locally:
 <a id="screenshots"></a>
 ### Screenshots
 
-![](./screenshots/demo_1.png)  
+*„Asystent Wiedzy BGK" — public BGK documents, Polish demo questions, source citations and honest refusal.*
 
-![](./screenshots/demo_2.png)  
+**Landing — Quick demo index + the five rehearsed questions (GROQ key supplied via server config):**
+![](./screenshots/demo_new_1.png)  
 
-![](./screenshots/demo_3.png)  
+**Refuse-on-no-context trap — „Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?" → „Nie wiem — brak podstawy w dokumentach.":**
+![](./screenshots/demo_new_2.png)  
+
+**Grounded answer with citations — „minimalna kwota Pożyczki" → 5 mln zł, and an honest „no info" on the part the corpus doesn't cover:**
+![](./screenshots/demo_new_3.png)  
+
+**Debug panel — per-chunk relevance/L2 scores, which chunks reached the LLM, and stage latencies:**
+![](./screenshots/demo_new_4.png)  
+
+**Comparison answer — „Co finansuje gwarancja Biznesmax, a co Ekomax?" with sources:**
+![](./screenshots/demo_new_5.png)  
 
 
 ### License
