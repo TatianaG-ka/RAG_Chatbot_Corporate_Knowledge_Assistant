@@ -46,14 +46,14 @@ st.title("Asystent Wiedzy BGK — RAG z cytowaniem źródeł (demo)")
 
 # --- sidebar -------------------------------------------------------------
 with st.sidebar:
-    st.header("Settings")
+    st.header("Ustawienia")
 
-    workspace = st.text_input("Workspace (company/project name)", value="default_company")
+    workspace = st.text_input("Przestrzeń robocza (nazwa firmy/projektu)", value="default_company")
     persist_dir = Path("vectorstore") / workspace
 
     groq_api_key = st.text_input("GROQ_API_KEY", value=GROQ_ENV, type="password")
     model_name = st.selectbox(
-        "Groq model",
+        "Model Groq",
         options=[
             "llama-3.1-8b-instant",
             "llama-3.1-70b-versatile",
@@ -62,17 +62,17 @@ with st.sidebar:
         index=0,
     )
     score_threshold = st.slider(
-        "Retrieval score threshold",
+        "Próg trafności",
         min_value=0.0,
         max_value=1.0,
         value=0.35,
         step=0.05,
-        help="Lower = more permissive retrieval; higher = stricter 'I don't know' behaviour.",
+        help="Niżej = bardziej liberalny retrieval; wyżej = surowsze „Nie wiem” (więcej odmów).",
     )
 
-    st.caption(f"Embeddings: {EMB_MODEL}")
+    st.caption(f"Embeddingi: {EMB_MODEL}")
     st.markdown("---")
-    st.caption("Quick demo uses a pre-built index (from the repo). Upload builds the index in session memory.")
+    st.caption("Tryb „Quick demo” buduje indeks z dokumentów w repo. Tryb „Wgraj pliki” buduje indeks w pamięci sesji.")
 
 
 # --- cached factories (survive re-renders) ------------------------------
@@ -102,7 +102,7 @@ def get_demo_index(assets_dir: str, _emb):
         if p.suffix.lower() in _DEMO_ASSET_SUFFIXES
     ]
     if not asset_paths:
-        return None, 0, [f"No supported files in {assets_dir}/ (expected .pdf/.txt/.md)."]
+        return None, 0, [f"Brak obsługiwanych plików w {assets_dir}/ (oczekiwane .pdf/.txt/.md)."]
     docs, errors = load_paths(asset_paths)
     if not docs:
         return None, 0, errors
@@ -144,7 +144,7 @@ def _build_index_from_uploads(files: List[Any], emb):
     handling are preserved from the previous on-disk helper.
     """
     if not files:
-        st.warning("No files to load.")
+        st.warning("Brak plików do wczytania.")
         return None, 0
     with tempfile.TemporaryDirectory(prefix="rag_uploads_") as tmp:
         tmp_dir = Path(tmp)
@@ -152,16 +152,16 @@ def _build_index_from_uploads(files: List[Any], emb):
         for up in files:
             safe_name = _safe_filename(up.name)
             if not safe_name:
-                st.error(f"Rejected upload with invalid name: {up.name!r}")
+                st.error(f"Odrzucono plik o nieprawidłowej nazwie: {up.name!r}")
                 continue
             target = tmp_dir / safe_name
             try:
                 target.write_bytes(up.getbuffer())
                 paths.append(target)
             except OSError as e:
-                st.error(f"Write error {safe_name}: {e}")
+                st.error(f"Błąd zapisu {safe_name}: {e}")
         if not paths:
-            st.warning("No files to load.")
+            st.warning("Brak plików do wczytania.")
             return None, 0
         # Loaders must finish reading before we drop out of the
         # with-block — they hold no file handles across the call,
@@ -170,17 +170,29 @@ def _build_index_from_uploads(files: List[Any], emb):
     for err in errors:
         st.warning(err)
     if not docs:
-        st.warning("Failed to load documents (check formats).")
+        st.warning("Nie udało się wczytać dokumentów (sprawdź format).")
         return None, 0
     vs, n_chunks = build_faiss_from_docs(docs, emb)
     return vs, n_chunks
 
 
 # --- mode & index configuration ----------------------------------------
-MODE_QUICK = "Quick demo (prebuilt)"
-MODE_UPLOAD = "Upload files (sessionally)"
+MODE_QUICK = "Quick demo (gotowy indeks)"
+MODE_UPLOAD = "Wgraj pliki (sesyjnie)"
 
-mode = st.radio("Mode:", [MODE_QUICK, MODE_UPLOAD], horizontal=True)
+# Demo questions rehearsed for the BGK presentation (docs/DEMO_RAG_dokumenty_BGK.md).
+# Q5 is the deliberate refuse-on-no-context trap — kept neutral so it reads like a
+# normal question; the system must answer „Nie wiem” because the corpus is for MŚP,
+# not consumer mortgages.
+DEMO_QUESTIONS = [
+    "Jaka jest minimalna kwota Pożyczki na cyfryzację i kto może wnioskować?",
+    "Do jakiej części kredytu sięga gwarancja de minimis?",
+    "Czym różni się Biznesmax od Ekomax?",
+    "Jaki jest okres gwarancji dla kredytu inwestycyjnego de minimis?",
+    "Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?",
+]
+
+mode = st.radio("Tryb:", [MODE_QUICK, MODE_UPLOAD], horizontal=True)
 embeddings = get_embeddings()
 
 VS_KEY = "vs"
@@ -191,47 +203,42 @@ if MODE_QUICK == mode:
     for msg in load_errors:
         st.warning(msg)
     if vs is None:
-        st.error("No demo documents found in ./assets/ (expected .pdf/.txt/.md).")
+        st.error("Brak dokumentów demo w ./assets/ (oczekiwane .pdf/.txt/.md).")
         st.stop()
     st.session_state[VS_KEY] = vs
-    st.success(f"Demo index built from ./assets/ ({n_chunks} chunks).")
+    st.success(f"Indeks demo zbudowany z ./assets/ ({n_chunks} fragmentów).")
 
-    cols = st.columns(3)
-    examples = [
-        "How long does a refund take?",
-        "How to reset my password?",
-        "How to apply a software update?",
-    ]
-    for i, ex in enumerate(examples):
-        if cols[i % 3].button(ex):
-            st.session_state["query"] = ex
+    st.caption("Przykładowe pytania demo:")
+    for i, q in enumerate(DEMO_QUESTIONS):
+        if st.button(q, key=f"demo_q_{i}", use_container_width=True):
+            st.session_state["query"] = q
 else:
     uploads = st.file_uploader(
-        "Upload documents (PDF/TXT/MD)",
+        "Wgraj dokumenty (PDF/TXT/MD)",
         type=["pdf", "txt", "md", "markdown"],
         accept_multiple_files=True,
-        help="Supported: PDF/TXT/MD (MD requires the unstructured package).",
+        help="Obsługiwane: PDF/TXT/MD (MD wymaga pakietu „unstructured”).",
     )
     c1, c2 = st.columns([1, 1])
     with c1:
-        if st.button("Build an index from my files"):
-            with st.spinner("Building an index..."):
+        if st.button("Zbuduj indeks z moich plików"):
+            with st.spinner("Buduję indeks…"):
                 vs_user, n_chunks = _build_index_from_uploads(uploads or [], embeddings)
                 if vs_user:
                     st.session_state[VS_USER_KEY] = vs_user
                     st.session_state[VS_KEY] = vs_user
-                    st.success(f"Index ready ({n_chunks} chunks).")
+                    st.success(f"Indeks gotowy ({n_chunks} fragmentów).")
     with c2:
-        if st.button("Index reset (session)"):
+        if st.button("Wyczyść indeks (sesja)"):
             st.session_state.pop(VS_USER_KEY, None)
             st.session_state.pop(VS_KEY, None)
-            st.info("Session index cleared.")
+            st.info("Indeks sesyjny wyczyszczony.")
 
 
 # --- chat (LLM + retrieval) --------------------------------------------
-st.subheader("Chat")
-session_id = st.text_input("Session ID", value="default_session")
-query = st.text_input("Your question:", value=st.session_state.get("query", ""))
+st.subheader("Czat")
+session_id = st.text_input("ID sesji", value="default_session")
+query = st.text_input("Twoje pytanie:", value=st.session_state.get("query", ""))
 
 if "stores" not in st.session_state:
     st.session_state.stores = {}
@@ -244,7 +251,7 @@ def _get_session_history(sid: str) -> BaseChatMessageHistory:
 
 
 if not groq_api_key:
-    st.info("Enter GROQ_API_KEY in the sidebar to chat.")
+    st.info("Wpisz GROQ_API_KEY w panelu bocznym, aby rozmawiać.")
     st.stop()
 
 llm = get_llm(groq_api_key, model_name)
@@ -347,7 +354,7 @@ def _render_debug(
             )
 
 
-if st.button("Send") and query.strip():
+if st.button("Wyślij") and query.strip():
     store = st.session_state.get(VS_KEY)
     if store is None:
         st.warning("Indeks nie został wczytany. Użyj trybu „Quick demo” lub zbuduj indeks z plików.")
@@ -420,13 +427,13 @@ if st.button("Send") and query.strip():
                 rewrite_ms, retrieval_ms, llm_ms,
             )
 
-with st.expander("Info / Limits"):
+with st.expander("Informacje / Ograniczenia"):
     st.markdown(
-        "- Quick demo: index rebuilt in-memory at cold start from `./assets/` (cached for container lifetime)\n"
-        "- Upload: index created in session memory (not saved to disk)\n"
-        "- No pickle deserialization at runtime — see ADR-4 in README for why.\n"
-        "- LLM: ChatGroq (selectable in sidebar)\n"
-        f"- Embeddings: {EMB_MODEL}\n"
+        "- Quick demo: indeks budowany w pamięci przy starcie z `./assets/` (cache na czas życia kontenera)\n"
+        "- Wgrywanie: indeks tworzony w pamięci sesji (nie zapisywany na dysk)\n"
+        "- Brak deserializacji pickle w runtime — uzasadnienie w ADR-4 w README\n"
+        "- LLM: ChatGroq (wybierany w panelu bocznym)\n"
+        f"- Embeddingi: {EMB_MODEL}\n"
         f"- Retrieval: ręczny pipeline — top-{RETRIEVAL_K} fragmentów ze score'ami, "
         f"filtr progu, max {CONTEXT_K} do LLM (max {MAX_PER_DOC}/dokument). "
         "Próg regulowany w panelu bocznym; szczegóły w „Debug: retrieval i pipeline”."
