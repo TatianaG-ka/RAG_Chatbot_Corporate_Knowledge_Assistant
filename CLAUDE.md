@@ -128,8 +128,14 @@ only when the key is *not* already in the environment). Embeddings run locally (
 - **Live-validation gap.** Retrieval is verified offline, but the LLM path needs `GROQ_API_KEY`.
   Before the demo, `streamlit run app.py` and confirm Q2 answers 60% and Q5 (kredyt hipoteczny)
   refuses — Q5 scores ABOVE threshold so the refusal must come from the prompt, not the threshold.
-- **HF Space deploy.** Pushing to `main` force-pushes to the Space. Expect 5–15 min rebuild;
-  watch for pickle/runtime incompatibilities. Don't deploy untested.
+- **HF Space deploy.** Pushing to `main` triggers `.github/workflows/main.yml`: a smoke job
+  (deps + `compileall` + import) gates a force-push to the Space. Expect 5–15 min rebuild.
+- **Binaries in `assets/` MUST be LFS-tracked before committing (resolved Faza 6 deploy).** The HF
+  Space `pre-receive` hook **rejects plain binary blobs** („Your push was rejected because it
+  contains binary files… use xet"). `.gitattributes` LFS-tracks `*.png` and `*.pdf`; any new binary
+  type (e.g. `*.docx`) must be added there *before* the commit. If a binary already slipped in as a
+  raw blob, fix with `git lfs migrate import --include="*.ext"` (rewrites history → force-push). This
+  bit the first deploy: the 6 BGK PDFs were committed as raw blobs and HF rejected the sync.
 
 ## Conventions
 
