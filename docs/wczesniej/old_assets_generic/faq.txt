@@ -1,0 +1,7 @@
+FAQ
+
+Q: How do I reset my password?
+A: Open the Settings panel, choose 'Account', then click 'Reset Password'. You will receive an email link.
+
+Q: Do I need internet to use offline mode?
+A: No, but you need internet to download the offline pack at least once.

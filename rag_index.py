@@ -22,8 +22,18 @@ except ImportError:
 # ~0), which the similarity threshold and debug panel rely on. (e5-base ranks well
 # but compresses all scores into ~0.65-0.83, so a threshold can't reject nonsense.)
 EMB_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 200
+# Chunk size was 1200/200, but that buried single-fact sentences. The Polish
+# legal PDFs pack ~12 unrelated clauses into a 1200-char chunk, so a one-line fact
+# (e.g. "Minimalna wartość udzielonej Pożyczki wynosi 5 mln zł") is ~8% of the
+# chunk and its averaged embedding is dominated by the surrounding clauses — the
+# answer chunk for the "minimalna kwota" demo question never even reached top-30.
+# Halving to 600/120 makes each chunk topically focused (the fact is ~16-20% of a
+# smaller, on-topic chunk), so it surfaces into the top-k and clears the threshold.
+# Measured: at 600/120 the 5-mln chunk jumps to rank 4 (rel 0.37 > 0.35); at 1200
+# it was off the chart. 600 (not 400) keeps neighbouring sentences together so
+# longer definitions aren't cut mid-thought.
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 120
 
 
 @dataclass(frozen=True)

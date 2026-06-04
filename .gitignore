@@ -61,9 +61,11 @@ tmp/
 .streamlit/secrets.toml
 
 # Environment files (if you are using dotenv locally)
+# opcjonalnie: szablon bez sekretów (komentarz MUSI być w osobnej linii —
+# .gitignore nie obsługuje komentarzy inline, inaczej negacja nie działa)
 .env
 .env.*
-!.env.example  # opcjonalnie: szablon bez sekretów
+!.env.example
 
 # IDE 
 # PyCharm / IntelliJ

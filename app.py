@@ -25,11 +25,20 @@ from rag_index import (
 
 # Retrieval breadth. RETRIEVAL_K chunks are scored for the debug panel (so we can
 # show what fell below the threshold); at most CONTEXT_K passing chunks are fed to
-# the LLM, matching the previous k=4 retriever budget. MAX_PER_DOC caps how many
-# chunks a single source contributes, so one large PDF can't monopolize context.
-RETRIEVAL_K = 8
-CONTEXT_K = 4
-MAX_PER_DOC = 2
+# the LLM. MAX_PER_DOC caps how many chunks a single source contributes.
+#
+# Tuned with the 600/120 chunking (see rag_index.CHUNK_SIZE). Smaller chunks mean a
+# single fact spans fewer chars, so the answer-bearing chunk often sits deeper in the
+# ranking and a fact-rich source contributes several near-tied chunks. We measured
+# all 5 demo questions: the "minimalna kwota" answer is the 4th-best chunk *within its
+# own PDF* (needs MAX_PER_DOC>=4), and the de minimis "120 mies." chunk ranks ~8th
+# overall behind FENG chunks (needs CONTEXT_K>=8 and RETRIEVAL_K>=12 to reach it).
+# These wider budgets surface every demo fact while the 0.35 threshold still rejects
+# out-of-corpus queries. The old 8/4/2 was tuned for 1200-char chunks and starved
+# single-document questions once chunks shrank.
+RETRIEVAL_K = 12
+CONTEXT_K = 8
+MAX_PER_DOC = 4
 
 # Supported suffixes for the demo index — kept in sync with build_demo_index.py.
 _DEMO_ASSET_SUFFIXES = {".pdf", ".txt", ".md", ".markdown"}
@@ -51,7 +60,13 @@ with st.sidebar:
     workspace = st.text_input("Przestrzeń robocza (nazwa firmy/projektu)", value="default_company")
     persist_dir = Path("vectorstore") / workspace
 
-    groq_api_key = st.text_input("GROQ_API_KEY", value=GROQ_ENV, type="password")
+    # When the key is provided via env/secret (e.g. an HF Space secret), don't show
+    # an input — one less thing to fiddle with on stage. Only prompt when it's missing.
+    if GROQ_ENV:
+        groq_api_key = GROQ_ENV
+        st.caption("🔑 GROQ_API_KEY: z konfiguracji serwera")
+    else:
+        groq_api_key = st.text_input("GROQ_API_KEY", value="", type="password")
     model_name = st.selectbox(
         "Model Groq",
         options=[
@@ -187,7 +202,7 @@ MODE_UPLOAD = "Wgraj pliki (sesyjnie)"
 DEMO_QUESTIONS = [
     "Jaka jest minimalna kwota Pożyczki na cyfryzację i kto może wnioskować?",
     "Do jakiej części kredytu sięga gwarancja de minimis?",
-    "Czym różni się Biznesmax od Ekomax?",
+    "Co finansuje gwarancja Biznesmax, a co gwarancja Ekomax?",
     "Jaki jest okres gwarancji dla kredytu inwestycyjnego de minimis?",
     "Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?",
 ]
@@ -237,7 +252,9 @@ else:
 
 # --- chat (LLM + retrieval) --------------------------------------------
 st.subheader("Czat")
-session_id = st.text_input("ID sesji", value="default_session")
+# Fixed session id — chat memory (multi-turn) still works, but a non-technical
+# reviewer shouldn't have to see or fill a "session id" field during the demo.
+session_id = "default_session"
 query = st.text_input("Twoje pytanie:", value=st.session_state.get("query", ""))
 
 if "stores" not in st.session_state:

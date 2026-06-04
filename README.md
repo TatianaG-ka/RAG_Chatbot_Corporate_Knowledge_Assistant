@@ -49,7 +49,7 @@ A secondary goal was to ship this to Hugging Face Spaces on the free tier so rev
 <a id="solution-architecture"></a>
 ## Planned Solution & Architecture
 
-- **Ingestion (offline)**: `build_demo_index.py` parses files from `./assets` (PDF/TXT/MD), splits them into chunks, generates embeddings (HF: `sentence-transformers/all-MiniLM-L6-v2`), and saves a FAISS index to `./vectorstore/default_company/`.
+- **Ingestion (offline)**: `build_demo_index.py` parses files from `./assets` (PDF/TXT/MD), splits them into chunks, generates embeddings (HF: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`), and saves a FAISS index to `./vectorstore/default_company/`. *Note:* the deployed app does not use this saved index — it rebuilds in memory on cold start (see [ADR-4](#key-decisions)).
 
 - **Retrieval**: the user’s query is (optionally) **rewritten** into a standalone question (history-aware), and then a `retriever (top-k)` is used to fetch the relevant context.
 
@@ -110,23 +110,27 @@ The resulting index is saved under:
 
 **Context:** single-process Streamlit app deployed to Hugging Face Spaces free tier — no sidecar services, ephemeral storage, cold starts measured in minutes when a model has to be re-downloaded.
 
-**Decision:** use FAISS persisted as two files (`index.faiss` + `index.pkl`, see `rag_index.py`) and commit a prebuilt demo index to the repo under `vectorstore/default_company/`.
+**Decision:** use FAISS in-process. The demo index is **rebuilt in memory from `./assets/` on every cold start** (see `get_demo_index` in `app.py`) — *not* committed to the repo and *not* loaded from a pickle (see [ADR-4](#key-decisions) for why shipping a pickled index was abandoned).
 
-**Why not Chroma / Qdrant:** both shine when you need metadata filters, hybrid search, or multi-tenant isolation. For a single demo corpus loaded once, they add a service dependency (Chroma server process, Qdrant container) that breaks the free-tier deployment model. FAISS runs in-process and the prebuilt index ships with the repo, so first-load latency is deterministic.
+**Why not Chroma / Qdrant:** both shine when you need metadata filters, hybrid search, or multi-tenant isolation. For a single demo corpus loaded once, they add a service dependency (Chroma server process, Qdrant container) that breaks the free-tier deployment model. FAISS runs in-process with no sidecar, so the whole app stays a single Streamlit process on the free tier.
 
 **Trade-off:** no server-side metadata filtering and no concurrent writes. A production tenant-per-workspace deployment would outgrow this quickly — a companion portfolio project (`invoice-processor`) uses Qdrant precisely because that use case needs it.
 
 ---
 
-### ADR-2 — Similarity score threshold over fixed top-k
+### ADR-2 — A manual, scored retrieval pipeline with a relevance threshold
 
-**Context:** the assistant sits in front of a small, curated corpus. If the user asks a question the corpus doesn't cover (which they will), a plain top-k retriever still returns 4 weakly-related chunks and the LLM cheerfully writes an answer based on them.
+**Context:** the assistant sits in front of a small, curated corpus. If the user asks a question the corpus doesn't cover (which they will), a plain top-k retriever still returns weakly-related chunks and the LLM cheerfully writes an answer based on them. The opaque LangChain `create_retrieval_chain` made it impossible to *show* why a given answer was produced — a problem for an auditability story.
 
-**Decision:** configure the retriever with `search_type="similarity_score_threshold"` and a sidebar-tunable threshold (default `0.35`, see `app.py`). When no chunk clears the threshold, the retriever returns `[]` and the QA system prompt instructs the LLM to respond *"I don't know"* rather than answer from context-less priors.
+**Decision:** replace the opaque chain with a **manual pipeline** (see `app.py`) built on two helpers in `rag_index.py`:
+- `retrieve_scored()` fetches the top `RETRIEVAL_K=12` chunks with a 0–1 relevance score (from the vectorstore's own `_select_relevance_score_fn`, the same value a `similarity_score_threshold` retriever would use).
+- `select_context()` keeps chunks above a **sidebar-tunable threshold** (default `0.35`), up to `CONTEXT_K=8`, with a per-document cap (`MAX_PER_DOC=4`) so one large PDF can't monopolize context.
 
-**Why:** hallucination in a corporate knowledge tool is a trust-killer heavier than missed recall. Users learn to verify an assistant that sometimes says "I don't know"; they abandon one that confidently cites the wrong policy.
+When **no** chunk clears the threshold, the app answers *„Nie wiem — brak podstawy w dokumentach."* **without ever calling the LLM** (a deterministic honest refusal). Every stage — rewritten query, per-chunk relevance/L2 scores, which chunks reached the LLM, stage latencies — is exposed in a Debug panel.
 
-**Trade-off:** valid questions phrased very differently from the source document can fall below the threshold. The sidebar slider lets power users loosen it for exploratory queries, and citations are always rendered so the user can verify the match.
+**Why:** hallucination in a corporate knowledge tool is a trust-killer heavier than missed recall. Users learn to verify an assistant that sometimes says "I don't know"; they abandon one that confidently cites the wrong policy. Making the pipeline observable turns "trust me" into "here's exactly what I retrieved and why".
+
+**Trade-off:** valid questions phrased very differently from the source document can fall below the threshold. The sidebar slider lets power users loosen it for exploratory queries, citations are always rendered so the user can verify the match, and the threshold is deliberately *not* set lower than 0.35 because that starts admitting out-of-corpus noise (see [ADR-6](#key-decisions)).
 
 ---
 
@@ -161,6 +165,30 @@ Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. 
 
 ---
 
+### ADR-5 — Multilingual embeddings chosen for clean out-of-corpus separation
+
+**Context:** the corpus pivoted to **public Polish-language BGK documents**. The original `sentence-transformers/all-MiniLM-L6-v2` is English-only and ranked Polish chunks poorly.
+
+**Decision:** use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` with `normalize_embeddings=True` (see `rag_index.py:EMB_MODEL`). The choice is data-driven — `_diag_step0.py` compares three models on the BGK corpus and is committed as an audit trail.
+
+**Why not e5-base:** it ranks chunks slightly better, but compresses all relevance scores into ~0.65–0.83 — so an out-of-corpus query ("stolica Mongolii") still scores ~0.72 and a fixed threshold can't reject it. `paraphrase-multilingual` gives clean separation (out-of-corpus relevance ≈ 0), which the entire honest-refusal demo ([ADR-2](#key-decisions)) depends on.
+
+**Trade-off:** absolute in-corpus scores are modest (top matches often 0.4–0.8), so the threshold and retrieval budgets ([ADR-6](#key-decisions)) had to be tuned to these score ranges rather than borrowed from an English-corpus default.
+
+---
+
+### ADR-6 — Chunk size 600 and retrieval budgets tuned to the corpus
+
+**Context:** with 1200-char chunks, a one-line fact (e.g. *"Minimalna wartość udzielonej Pożyczki wynosi 5 mln zł"*) was ~8% of a chunk packed with ~12 unrelated legal clauses. Its averaged embedding was dominated by the surrounding text, so the answer-bearing chunk never reached the top of the ranking and the assistant wrongly answered *"brak informacji"* — a recall failure, not hallucination.
+
+**Decision:** halve the chunking to `CHUNK_SIZE=600 / CHUNK_OVERLAP=120` (`rag_index.py`) and widen the retrieval budgets to `RETRIEVAL_K=12 / CONTEXT_K=8 / MAX_PER_DOC=4` (`app.py`). Smaller chunks are topically focused so a single fact surfaces; wider budgets let the answer chunk reach the LLM even when it ranks behind near-tied chunks or chunks from a different document.
+
+**Why these numbers:** measured offline against all five rehearsed demo questions. The "minimalna kwota" answer is the **4th-best chunk within its own PDF** (so `MAX_PER_DOC` had to allow 4); the de minimis "120 miesięcy" chunk ranks **~8th overall**, behind FENG chunks that also discuss guarantee periods (so `CONTEXT_K`/`RETRIEVAL_K` had to widen). All five facts land in context with these budgets, while the `0.35` threshold still cleanly rejects out-of-corpus queries.
+
+**Trade-off:** the threshold was deliberately **not** lowered to improve recall further — at `0.30`, an out-of-corpus query like "przepis na sernik" leaks in at relevance `0.312` (the Polish word *przepis* collides with *przepisy* = regulations, which pervade the corpus). Recall is bought with chunking and budgets, not by weakening the refusal guarantee.
+
+---
+
 <a id="technologies-used"></a>
 ## Technologies Used
 
@@ -168,7 +196,7 @@ Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. 
 | --------------------------------------------- | --------------------------------------------------- |
 | **LangChain** (core/community/text-splitters) | Retrieval pipeline + prompts + conversation history |
 | **FAISS**                                     | Vector search over context                          |
-| **HuggingFace Embeddings**                    | `sentence-transformers/all-MiniLM-L6-v2`            |
+| **HuggingFace Embeddings**                    | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` |
 | **ChatGroq**                                  | LLM (Groq API) for answer generation                |
 | **Streamlit**                                 | UI locally / on Hugging Face Spaces                 |
 
