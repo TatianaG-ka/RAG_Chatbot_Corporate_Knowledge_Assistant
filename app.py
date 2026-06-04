@@ -15,6 +15,7 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_groq import ChatGroq
 
 from rag_index import (
+    EMB_MODEL,
     build_embeddings,
     build_faiss_from_docs,
     load_paths,
@@ -59,7 +60,7 @@ with st.sidebar:
         help="Lower = more permissive retrieval; higher = stricter 'I don't know' behaviour.",
     )
 
-    st.caption("Embeddings: sentence-transformers/all-MiniLM-L6-v2")
+    st.caption(f"Embeddings: {EMB_MODEL}")
     st.markdown("---")
     st.caption("Quick demo uses a pre-built index (from the repo). Upload builds the index in session memory.")
 
@@ -327,6 +328,6 @@ with st.expander("Info / Limits"):
         "- Upload: index created in session memory (not saved to disk)\n"
         "- No pickle deserialization at runtime — see ADR-4 in README for why.\n"
         "- LLM: ChatGroq (selectable in sidebar)\n"
-        "- Embeddings: sentence-transformers/all-MiniLM-L6-v2\n"
+        f"- Embeddings: {EMB_MODEL}\n"
         "- Retrieval: similarity_score_threshold (k=4). Threshold adjustable in sidebar."
     )

@@ -14,7 +14,13 @@ try:
 except ImportError:
     HAS_MD = False
 
-EMB_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+# Multilingual model: the demo corpus is Polish (public BGK documents), and the
+# English-only all-MiniLM-L6-v2 gave poor retrieval + compressed scores on Polish
+# queries. paraphrase-multilingual-MiniLM-L12-v2 ranks Polish chunks correctly AND
+# keeps clean in-corpus vs out-of-corpus separation (out-of-corpus relevance goes
+# ~0), which the similarity threshold and debug panel rely on. (e5-base ranks well
+# but compresses all scores into ~0.65-0.83, so a threshold can't reject nonsense.)
+EMB_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
 
@@ -26,8 +32,21 @@ class IndexInfo:
 
 
 def build_embeddings() -> HuggingFaceEmbeddings:
-    """Return the HF embeddings object. Call sites are expected to cache this."""
-    return HuggingFaceEmbeddings(model_name=EMB_MODEL)
+    """Return the HF embeddings object. Call sites are expected to cache this.
+
+    normalize_embeddings=True is REQUIRED, not optional: FAISS defaults to
+    EUCLIDEAN_DISTANCE and its relevance score formula (1.0 - L2/sqrt(2)) is
+    only meaningful for unit vectors. Without normalization, paraphrase-multilingual
+    emits arbitrary-magnitude vectors whose L2 distances far exceed sqrt(2), so
+    every in-corpus query scores negative and falls below the similarity threshold —
+    the retriever returns [] for everything and the demo answers "I don't know" to
+    every question. This config must match _diag_step0.py, which proved the model
+    choice with normalization on.
+    """
+    return HuggingFaceEmbeddings(
+        model_name=EMB_MODEL,
+        encode_kwargs={"normalize_embeddings": True},
+    )
 
 
 def split_docs(docs: List[Document]) -> List[Document]:
