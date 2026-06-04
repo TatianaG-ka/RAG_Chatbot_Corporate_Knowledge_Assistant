@@ -32,15 +32,15 @@ Legenda: `[ ]` do zrobienia · `[~]` w toku · `[x]` zrobione · `[R]` po podwó
 - [x] **3.R Podwójna kontrola — `/dev-docs-review`** → subagent: 0 blockerów, akceptacja. Nity Fazy 5: tooltip slidera wciąż EN.
 - _Akceptacja:_ ✅ prompty i refusal naturalne po polsku, składnia/encoding OK, CI zielone
 
-## Faza 4 — Refactor pipeline + debug panel — L
-- [ ] 4.1 Ręczny rewrite (capture rewritten_question)
-- [ ] 4.2 Ręczny retrieval ze score'ami + konwersja `vs._select_relevance_score_fn()` (raw_distance + score)
-- [ ] 4.3 Zero chunków powyżej progu → alert „Nie wiem", pomiń LLM
-- [ ] 4.4 Ręczny stuff + LLM, zachowaj history-aware (pamięć rozmowy)
-- [ ] 4.5 Debug expander: rewritten query, top-K score'y (✅/✗), próg, model, latency_ms
-- [ ] 4.6 Zachowaj cytaty + ścieżkę uploadów
-- [ ] **4.R Podwójna kontrola — `/dev-docs-review` (najważniejsza)**
-- _Akceptacja:_ score'y spójne z retrieverem; turn1+turn2 działają; cytaty bez zmian
+## Faza 4 — Refactor pipeline + debug panel — L [R] (commit d84e475)
+- [x] 4.1 Ręczny rewrite (history-aware tylko gdy jest historia)
+- [x] 4.2 `retrieve_scored()` w rag_index.py — jeden embed, relevance via `_select_relevance_score_fn` (= retriever) + raw L2. 🔵 NOWE: `select_context()` z limitem 2/dokument → naprawia pułapkę de minimis (top-4 było całe z Biznesmax/80%, teraz dochodzi dok de minimis/60%)
+- [x] 4.3 Zero powyżej progu → „Nie wiem — brak podstawy w dokumentach", LLM pominięty
+- [x] 4.4 Ręczny stuff + LLM history-aware; tura zapisywana w obu gałęziach (odpowiedź i refuse)
+- [x] 4.5 Debug panel: rewritten query, relevance+L2, ✅/➖/✗ (do LLM / odcięte limitem / poniżej progu), próg, model, latencje (rewrite/retrieval/LLM)
+- [x] 4.6 Cytaty z `used` (nie `scored`) + ścieżka uploadów nietknięta
+- [x] **4.R Podwójna kontrola — `/dev-docs-review`** → subagent: 0 blockerów. Naprawione: A (podwójny embed+kruchy zip → jeden embed), B (żywa ref historii → snapshot `list()`), C (opis Info/Limits), E (przypis o limicie). D (quick-buttons EN) → Faza 5.
+- _Akceptacja:_ ✅ score'y spójne z retrieverem (identyczne przed/po fixie A); 5/5 pytań ma właściwy dok w kontekście; OOD→refuse. ⚠️ ścieżka LLM niezweryfikowana bez GROQ_API_KEY → walidacja na żywo w Fazie 6
 
 ## Faza 5 — Quick-buttons + sanity de minimis — S
 - [ ] 5.1 3 przyciski EN → 5 pytań demo PL (app.py:189-195)
