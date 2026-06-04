@@ -42,11 +42,11 @@ Legenda: `[ ]` do zrobienia · `[~]` w toku · `[x]` zrobione · `[R]` po podwó
 - [x] **4.R Podwójna kontrola — `/dev-docs-review`** → subagent: 0 blockerów. Naprawione: A (podwójny embed+kruchy zip → jeden embed), B (żywa ref historii → snapshot `list()`), C (opis Info/Limits), E (przypis o limicie). D (quick-buttons EN) → Faza 5.
 - _Akceptacja:_ ✅ score'y spójne z retrieverem (identyczne przed/po fixie A); 5/5 pytań ma właściwy dok w kontekście; OOD→refuse. ⚠️ ścieżka LLM niezweryfikowana bez GROQ_API_KEY → walidacja na żywo w Fazie 6
 
-## Faza 5 — Quick-buttons + sanity de minimis — S
-- [ ] 5.1 3 przyciski EN → 5 pytań demo PL (app.py:189-195)
-- [ ] 5.2 Potwierdź odpowiedź de minimis = 60% (nie 80%)
-- [ ] **5.R Podwójna kontrola — `/dev-docs-review`**
-- _Akceptacja:_ przyciski wstawiają pytania; #2 zwraca 60% z cytatem
+## Faza 5 — Quick-buttons + sanity de minimis — S [R] (commit b2ded3c)
+- [x] 5.1 3 przyciski EN → **5 pytań demo PL** (`DEMO_QUESTIONS`, full-width, key=demo_q_i). Bonus: pełna lokalizacja UI (sidebar, radio, upload, czat, Wyślij, Info, komunikaty błędów)
+- [x] 5.2 de minimis 60%: retrieval potwierdzony (dok de minimis z „nie większy niż 60%" w kontekście Q2/Q4). ⚠️ tekst odpowiedzi „60%" do potwierdzenia na żywo (Faza 6, wymaga LLM)
+- [x] **5.R Podwójna kontrola — `/dev-docs-review`** → subagent: 0 blockerów. Naprawione: 🟠 angielski warning w get_demo_index (linia 105), nit slidera „(relevance)". „(history-aware)" zostawione (terminologia debug panelu). Bug cudzysłowów NIE wystąpił (sweep czysty).
+- _Akceptacja:_ ✅ przyciski wstawiają 5 pytań demo; pytania zgodne ze spec; UI po polsku; #2 ma źródło 60% w kontekście (tekst → Faza 6)
 
 ## Faza 6 — Test E2E + commit + deploy — M
 - [ ] 6.1 `streamlit run app.py` — przeklik 5 pytań + debug + refusal #5
