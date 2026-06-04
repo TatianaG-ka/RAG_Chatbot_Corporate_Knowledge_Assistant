@@ -82,6 +82,14 @@ poetry.lock
 # The repo deploys to a public HF Space, so keep these off-repo.
 dev/
 
+# Internal working docs / planning / sources / project guidance — kept LOCAL, NOT public.
+# (job posting, legal reasoning, BRH source drafts, validation logs, archived plans,
+# the embedding-diagnostic script, and the Claude/dev guidance file). The repo is a
+# public portfolio + HF Space; these reveal recruitment context and stay off-repo.
+docs/
+CLAUDE.md
+_diag_step0.py
+
 # FAISS demo index — rebuilt at cold-start from ./assets/, never committed
 # (pickle format drifts across dep versions and breaks on HF runtime bumps —
 # see README ADR-4). Keep the folder off-repo; rebuild is deterministic.

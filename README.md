@@ -172,7 +172,7 @@ Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. 
 
 **Context:** the corpus is **Polish-language**. The original `sentence-transformers/all-MiniLM-L6-v2` is English-only and ranked Polish chunks poorly.
 
-**Decision:** use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` with `normalize_embeddings=True` (see `rag_index.py:EMB_MODEL`). The choice is data-driven — `_diag_step0.py` compares three models on a Polish corpus and is committed as an audit trail.
+**Decision:** use `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` with `normalize_embeddings=True` (see `rag_index.py:EMB_MODEL`). The choice is data-driven — three embedding models were benchmarked on the Polish corpus before settling on this one.
 
 **Why not e5-base:** it ranks chunks slightly better, but compresses all relevance scores into ~0.65–0.83 — so an out-of-corpus query ("stolica Mongolii") still scores ~0.72 and a fixed threshold can't reject it. `paraphrase-multilingual` gives clean separation (out-of-corpus relevance ≈ 0), which the entire honest-refusal demo ([ADR-2](#key-decisions)) depends on.
 
@@ -186,7 +186,7 @@ Uploaded filenames are stripped via `_safe_filename` to prevent path traversal. 
 
 **Decision:** `CHUNK_SIZE=600 / CHUNK_OVERLAP=120` (`rag_index.py`) with retrieval budgets `RETRIEVAL_K=12 / CONTEXT_K=8 / MAX_PER_DOC=4` (`app.py`). Smaller chunks are topically focused so a single fact surfaces; the budgets let the answer chunk reach the LLM even when it ranks behind near-tied chunks or chunks from another document.
 
-**Why these numbers:** measured offline against all five rehearsed demo questions (`docs/testowanie_rag/_WALIDACJA_BRH.txt`) — every fact lands in context (loan min/max amounts, de minimis 60% / 3.5 M zł, the EkoHoryzont-vs-Rozwój contrast, the human-in-the-loop AI rule), while the `0.35` threshold cleanly refuses the deposit-rate trap and other out-of-corpus queries. Question *phrasing* also matters: a query that repeats the program name ("…Pożyczki na Cyfryzację i AI") pulls the match toward title/intro chunks, so the amount question is phrased plainly ("…kwota Pożyczki?") to surface the right paragraph.
+**Why these numbers:** measured offline against all five rehearsed demo questions — every fact lands in context (loan min/max amounts, de minimis 60% / 3.5 M zł, the EkoHoryzont-vs-Rozwój contrast, the human-in-the-loop AI rule), while the `0.35` threshold cleanly refuses the deposit-rate trap and other out-of-corpus queries. Question *phrasing* also matters: a query that repeats the program name ("…Pożyczki na Cyfryzację i AI") pulls the match toward title/intro chunks, so the amount question is phrased plainly ("…kwota Pożyczki?") to surface the right paragraph.
 
 **Trade-off:** the threshold is deliberately kept at `0.35` rather than lowered for extra recall — recall is bought with chunking, budgets, and phrasing, not by weakening the refusal guarantee. (On an earlier PDF corpus, lowering to `0.30` let an out-of-corpus "przepis na sernik" leak in at `0.312`, because the Polish *przepis* collides with *przepisy* = regulations.)
 
