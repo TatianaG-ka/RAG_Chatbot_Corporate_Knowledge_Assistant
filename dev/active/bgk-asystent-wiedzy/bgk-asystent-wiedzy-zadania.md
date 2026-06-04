@@ -48,12 +48,27 @@ Legenda: `[ ]` do zrobienia · `[~]` w toku · `[x]` zrobione · `[R]` po podwó
 - [x] **5.R Podwójna kontrola — `/dev-docs-review`** → subagent: 0 blockerów. Naprawione: 🟠 angielski warning w get_demo_index (linia 105), nit slidera „(relevance)". „(history-aware)" zostawione (terminologia debug panelu). Bug cudzysłowów NIE wystąpił (sweep czysty).
 - _Akceptacja:_ ✅ przyciski wstawiają 5 pytań demo; pytania zgodne ze spec; UI po polsku; #2 ma źródło 60% w kontekście (tekst → Faza 6)
 
-## Faza 6 — Test E2E + commit + deploy — M
-- [ ] 6.1 `streamlit run app.py` — przeklik 5 pytań + debug + refusal #5
-- [ ] 6.2 CI smoke: `compileall` + import test
-- [ ] 6.3 Commit faz na branchu; merge do main po akceptacji
+## Faza 6 — Test E2E + commit + deploy — M [~]
+- [~] 6.0 **Retrieval re-tuning** (bug recall wykryty w teście live): chunk 1200/200→**600/120**,
+      budżety 8/4/2→**12/8/4**, próg zostaje 0.35 (0.30 przepuszczał OOD „sernik"=0.312). Q3 pytanie
+      przeformułowane. UI: ukryty GROQ key (env) + ukryte „ID sesji". `.gitignore` fix. Docs (CLAUDE+ADR-y).
+      Walidacja offline 5/5 faktów + OOD odrzucony (`docs/testowanie_rag/_WALIDACJA_KONCOWA.txt`). Commit `3043fa3`.
+- [ ] 6.1 `streamlit run app.py` — przeklik 5 pytań + debug + refusal #5 (wymaga GROQ_API_KEY)
+- [x] 6.2 CI smoke: `compileall` + import test (compileall ✅ w review)
+- [ ] 6.3 Commit faz na branchu (✅ WIP `3043fa3`); merge do main po akceptacji
 - [ ] 6.4 Deploy HF Space — świadomie (5-15 min rebuild, pilnuj pickle/runtime)
+- [x] **6.R Podwójna kontrola — `/dev-docs-review`** → subagent (code-architecture-reviewer): **0 blockerów**,
+      2🟠 (stale README), 3🟡, 3🔵. compileall ✅, gotchas (cudzysłowy, sufiksy, granica testowalności,
+      pamięć czatu, liczby kod↔docs) wszystkie OK. Raport: `review-faza-6.md`.
 - _Akceptacja:_ demo E2E lokalnie OK; CI zielone; deploy = osobna decyzja
+
+## Do poprawy po review fazy 6
+- [ ] 🟠 [important] **README.md:58** — usunąć „`RunnableWithMessageHistory`" (już nieużywane); opisać ręczny `ChatMessageHistory` + snapshot `chat_history`
+- [ ] 🟠 [important] **README.md:102** — „loads via `load_faiss()`" → Quick demo robi rebuild in-memory przez `get_demo_index()` (sprzeczne z ADR-4)
+- [ ] 🟡 [nit] **README.md:60** — „retriever (top-k)" → bezpośrednie `retrieve_scored()`
+- [ ] 🟡 [nit] **CLAUDE.md:52** — doprecyzować, że pole GROQ w sidebarze znika, gdy klucz jest w env
+- [ ] 🔵 [suggestion] **app.py:37** — dodać odnośnik do `_WALIDACJA_KONCOWA.txt` przy komentarzu „~8th"
+- [ ] 🟡 [do sprawdzenia na żywo] **DEMO_RAG:20** — czy LLM przy Q1 nie sugeruje, że nabór Pożyczki jest aktywny (zawieszony od 1.10.2025)
 
 ---
 

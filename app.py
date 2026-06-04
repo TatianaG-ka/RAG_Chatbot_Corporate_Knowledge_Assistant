@@ -30,12 +30,13 @@ from rag_index import (
 # Tuned with the 600/120 chunking (see rag_index.CHUNK_SIZE). Smaller chunks mean a
 # single fact spans fewer chars, so the answer-bearing chunk often sits deeper in the
 # ranking and a fact-rich source contributes several near-tied chunks. We measured
-# all 5 demo questions: the "minimalna kwota" answer is the 4th-best chunk *within its
-# own PDF* (needs MAX_PER_DOC>=4), and the de minimis "120 mies." chunk ranks ~8th
-# overall behind FENG chunks (needs CONTEXT_K>=8 and RETRIEVAL_K>=12 to reach it).
-# These wider budgets surface every demo fact while the 0.35 threshold still rejects
-# out-of-corpus queries. The old 8/4/2 was tuned for 1200-char chunks and starved
-# single-document questions once chunks shrank.
+# all 5 demo questions (evidence: docs/testowanie_rag/_WALIDACJA_KONCOWA.txt): the
+# "minimalna kwota" answer is the 4th-best chunk *within its own PDF* (needs
+# MAX_PER_DOC>=4), and the de minimis "120 mies." chunk ranks ~8th overall behind FENG
+# chunks (needs CONTEXT_K>=8 and RETRIEVAL_K>=12 to reach it). These wider budgets
+# surface every demo fact while the 0.35 threshold still rejects out-of-corpus queries.
+# The old 8/4/2 was tuned for 1200-char chunks and starved single-document questions
+# once chunks shrank.
 RETRIEVAL_K = 12
 CONTEXT_K = 8
 MAX_PER_DOC = 4

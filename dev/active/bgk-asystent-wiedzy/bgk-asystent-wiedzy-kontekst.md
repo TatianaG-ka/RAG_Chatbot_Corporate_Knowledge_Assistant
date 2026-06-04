@@ -53,6 +53,18 @@
 5. **Podwójna kontrola** — każda faza kodu (2-6) → `/dev-docs-review` przez subagenta PRZED zatwierdzeniem.
 6. **Deploy świadomy** — push do `main` force-pushuje na HF Space (5-15 min rebuild). Dopiero po akceptacji.
 
+## Review Fazy 6 (2026-06-04, commit `3043fa3`)
+- **Podwójna kontrola (6.R)** przez `code-architecture-reviewer`: **0 blockerów**, 2🟠 / 3🟡 / 3🔵.
+  Raport: `review-faza-6.md`. compileall ✅. Poprawki w „Do poprawy po review fazy 6" (zadania.md).
+- **Kluczowy wniosek:** kod retrievalu poprawny i spójny z docs (liczby 600/120, 12/8/4, próg 0.35
+  zsynchronizowane); wszystkie gotchas (cudzysłowy, sufiksy, granica testowalności, pamięć czatu) OK.
+  Oba 🟠 to stale zdania w *ciele* README (poza ADR-ami): `:58` RunnableWithMessageHistory (usunięte
+  w Fazie 4), `:102` load_faiss (Quick demo robi rebuild in-memory). Nie-blokujące, do poprawy
+  przed/przy merge.
+- **Decyzja progu utrwalona:** próg 0.35 świadomie NIE obniżony — 0.30 przepuszcza OOD „przepis na
+  sernik" (0.312, kolizja „przepis"=regulacja). Recall kupiony chunkowaniem + budżetami, nie progiem.
+- **Warunek przed main (= deploy HF):** live E2E z GROQ (Q2=60%, Q5=odmowa) — poza zakresem review.
+
 ## Zależności
 - `GROQ_API_KEY` (sidebar lub `.env`).
 - `.venv` Python 3.11.9 — sprawne, zależności z `requirements.txt` zainstalowane.

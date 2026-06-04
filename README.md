@@ -30,8 +30,10 @@ pinned: false
 <a id="project-overview"></a>
 ## Project Overview
 
-This project implements a **Retrieval-Augmented Generation (RAG)** chatbot that enables users to query internal company documentation (PDF/TXT/MD, etc.) in natural language.
-The assistant returns answers **with source citations** and maintains **context** of the conversation.
+This project implements a **Retrieval-Augmented Generation (RAG)** chatbot that enables users to query a document corpus (PDF/TXT/MD) in natural language.
+The assistant returns answers **with source citations**, maintains **conversational context**, and — critically — **refuses to answer when the corpus doesn't support the question** (no hallucination).
+
+The live demo (*„Asystent Wiedzy BGK"*) runs on a small corpus of **public Bank Gospodarstwa Krajowego documents** (bgk.pl): de minimis / FENG Biznesmax Plus / Ekomax guarantees, the "Pożyczka na cyfryzację" rules, and the BGK 2025–2030 strategy. Nothing confidential — the same pipeline runs identically on private documents in a real tenant.
 
 ---
 
@@ -51,13 +53,13 @@ A secondary goal was to ship this to Hugging Face Spaces on the free tier so rev
 
 - **Ingestion (offline)**: `build_demo_index.py` parses files from `./assets` (PDF/TXT/MD), splits them into chunks, generates embeddings (HF: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`), and saves a FAISS index to `./vectorstore/default_company/`. *Note:* the deployed app does not use this saved index — it rebuilds in memory on cold start (see [ADR-4](#key-decisions)).
 
-- **Retrieval**: the user’s query is (optionally) **rewritten** into a standalone question (history-aware), and then a `retriever (top-k)` is used to fetch the relevant context.
+- **Retrieval**: the user’s query is (optionally) **rewritten** into a standalone question (history-aware, only when there is prior conversation), then `retrieve_scored()` fetches the top-k chunks with relevance scores and `select_context()` filters them by a tunable threshold and a per-document cap (see [ADR-2](#key-decisions) / [ADR-6](#key-decisions)). When nothing clears the threshold, the app refuses **without calling the LLM**.
 
-- **Generation (LLM)**: the **Groq** model (ChatGroq) receives the context + prompt and generates the answer.
+- **Generation (LLM)**: the **Groq** model (ChatGroq) receives the selected context + a cite-or-admit prompt and generates the answer; citations are built deterministically from the chunks actually fed to the LLM.
 
-- **Memory**: I use **ChatMessageHistory** (LangChain `RunnableWithMessageHistory`) to keep conversational history.
+- **Memory**: a manual `ChatMessageHistory` keyed by session id — a snapshot of prior turns is read before the turn and passed explicitly as `chat_history` to each prompt (no `RunnableWithMessageHistory` wrapper, so every stage stays observable).
 
-- **UI**: Streamlit (locally or on **Hugging Face Spaces**), with **Quick demo (prebuilt index)** and **Upload (session-memory index)** modes.
+- **UI**: Streamlit (locally or on **Hugging Face Spaces**), with **Quick demo (in-memory index from `./assets/`)** and **Upload (session-memory index)** modes, plus a debug panel exposing per-chunk scores and stage latencies.
 
 ---
 
@@ -66,16 +68,21 @@ A secondary goal was to ship this to Hugging Face Spaces on the free tier so rev
 [User (Streamlit UI on Hugging Face Spaces)]
         |
         v
-[LangChain Retriever + Memory]
+[History-aware query rewrite (manual)]
         |
         v
-[Vector DB: FAISS]
+[FAISS — retrieve_scored() top-k + scores]
         |
-[Retrieved Context]
         v
-[LLM (Groq)]
+[select_context(): threshold + per-doc cap]
         |
-[Response + Citations]
+   nothing passes? --> [Refuse "Nie wiem" — LLM skipped]
+        |
+[Selected Context]
+        v
+[LLM (Groq) — cite-or-admit prompt]
+        |
+[Response + deterministic Citations + Debug panel]
         v
 [UI Display]
 
@@ -85,21 +92,17 @@ A secondary goal was to ship this to Hugging Face Spaces on the free tier so rev
 <a id="what-builds-faiss-index"></a>
 #### What builds the FAISS index?
 
-*Note*: The FAISS index is built using the `build_demo_index.py` script (which imports utilities from `rag_index.py`).
-The resulting index is saved under:
+The deployed app **does not ship or load a pickled index**. In Quick demo mode it rebuilds the FAISS index **in memory from `./assets/` on every cold start** (`get_demo_index` in `app.py`, cached for the container's lifetime). Uploads build a session-only index in memory and are never persisted. See [ADR-4](#key-decisions) for why a pickled index was abandoned.
 
-- `vectorstore/default_company/index.faiss` and `index.pkl` (current)
-- or `vectorstore/default_company/faiss.index` and `docs.pkl` (legacy)
-
-| The app accepts both variants.
+`build_demo_index.py` can still write a FAISS index to `./vectorstore/default_company/` for **local/offline** use, but that path is gitignored and not used by the deployed app.
 
 #### File roles
 
-- `rag_index.py` – shared utilities: loading assets, building/saving/loading FAISS, embeddings, split params, loaders (PDF/TXT/MD).
+- `rag_index.py` – Streamlit-free RAG plumbing: loading assets, chunking, embeddings, FAISS build/save/load, and the scored-retrieval helpers `retrieve_scored()` / `select_context()`.
 
-- `build_demo_index.py` – one-off script to build a demo index from `./assets/*` and save it to `./vectorstore/default_company`.
+- `build_demo_index.py` – optional offline CLI to build a demo index from `./assets/*` to `./vectorstore/default_company` (local use only).
 
-- `app.py` – Streamlit app. Uses `build_embeddings()`, and for uploads builds a session-only index via `build_faiss_from_docs()`; for the prebuilt demo it loads via `load_faiss()`.
+- `app.py` – Streamlit app + the manual RAG pipeline. Builds the demo index in memory via `get_demo_index()` (Quick demo) or `build_faiss_from_docs()` (uploads); `load_faiss()` is retained in `rag_index.py` for local offline use only.
 
 ---
 
@@ -224,17 +227,22 @@ No installation required — just open the demo link below:
 
 Steps:
 1. Open the Hugging Face Space.  
-2. (Quick demo) uses the **pre-built** index from the repo. 
-   (Upload) allows you to upload your own files (PDF/TXT/MD) and build an index **in session memory**. 
-3. Upload or use the example documents from the `/assets` folder.  
-   - `manual.pdf`  
-   - `faq.txt`  
-   - `policy.md`  
-4. Ask a question in natural language. Example demo questions:  
-   - "How long does a refund take?"  
-   - "How to reset my password?"  
-   - "How to apply a software update?"  
-5. View AI-generated responses with **citations** from your documents.
+2. (Quick demo) rebuilds an index **in memory** from the public BGK documents in `/assets`.
+   (Upload) lets you upload your own files (PDF/TXT/MD) and build an index **in session memory**. 
+3. The Quick demo corpus (`/assets`) is six public BGK PDFs:  
+   - `Gwarancja_de_minimis_warunki_od_2026-04-16.pdf`  
+   - `Gwarancja_FENG_Biznesmax_Plus_warunki.pdf`  
+   - `Gwarancja_FENG_przewodnik_po_kryteriach.pdf`  
+   - `Pozyczka_na_cyfryzacje_zasady_naboru.pdf` / `Pozyczka_na_cyfryzacje_klauzula_RODO.pdf`  
+   - `Strategia_BGK_2025-2030.pdf`  
+4. Ask a question in natural language (the demo ships five rehearsed Polish questions as buttons):  
+   - „Jaka jest minimalna kwota Pożyczki na cyfryzację i kto może wnioskować?"  
+   - „Do jakiej części kredytu sięga gwarancja de minimis?"  
+   - „Co finansuje gwarancja Biznesmax, a co gwarancja Ekomax?"  
+   - **(refuse-on-no-context trap)** „Czy gwarancja de minimis obejmuje kredyt hipoteczny dla osoby fizycznej?" → *„Nie wiem — brak podstawy w dokumentach."*  
+5. View AI-generated responses with **citations**, or the deterministic refusal when the corpus doesn't cover the question.
+
+> A `GROQ_API_KEY` is required for the LLM step (sidebar, or an env/Space secret). Embeddings run locally on CPU — no key needed.
 
 ---
 
@@ -251,12 +259,10 @@ If you prefer to run the project locally:
 3. Install dependencies
 `pip install -r requirements.txt`
 
-4. (Optional) Build the document index if you change files in ./assets
+4. (Optional) Build a local FAISS index to disk
 `python build_demo_index.py`
 
-*Note:*
-- The FAISS index is built using the `build_demo_index.py` script (which imports utilities from `rag_index.py`).
-- This step only needs to be run once, or whenever new documents are added to the knowledge base.
+*Note:* this is **optional** — the app rebuilds the index in memory from `./assets/` at startup regardless (see [ADR-4](#key-decisions)). The script is only for local/offline experiments.
 
 5. Run the Streamlit app
 `streamlit run app.py`
@@ -264,10 +270,10 @@ If you prefer to run the project locally:
 6. Then open your browser and go to
 `http://localhost:8501`
 
-7. Example Queries:
-- "How long does a refund take?"
-- "How to reset my password?"
-- "How to apply a software update?"
+7. Example queries (Quick demo corpus):
+- „Jaki jest okres gwarancji dla kredytu inwestycyjnego de minimis?"
+- „Do jakiej części kredytu sięga gwarancja de minimis?"
+- „Co finansuje gwarancja Biznesmax, a co gwarancja Ekomax?"
 
 ---
 <a id="screenshots"></a>

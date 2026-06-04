@@ -49,7 +49,8 @@ python -m compileall -q app.py rag_index.py build_demo_index.py
 python -c "import rag_index; import build_demo_index; print('imports ok')"
 ```
 
-Requires `GROQ_API_KEY` (entered in the sidebar or via `.env`). Embeddings run locally (CPU), no key needed.
+Requires `GROQ_API_KEY` (via `.env`/env/HF-Space secret, or the sidebar field — which is shown
+only when the key is *not* already in the environment). Embeddings run locally (CPU), no key needed.
 
 ## Architecture
 
