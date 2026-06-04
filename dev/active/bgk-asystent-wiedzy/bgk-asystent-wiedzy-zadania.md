@@ -24,13 +24,13 @@ Legenda: `[ ]` do zrobienia · `[~]` w toku · `[x]` zrobione · `[R]` po podwó
 - [x] **2.R Podwójna kontrola — `/dev-docs-review`** → subagent (code-architecture-reviewer) empirycznie potwierdził blocker normalize; fix zaaplikowany + zweryfikowany; CI zielone. 🟠 do zrobienia: zdecydować los `_diag_step0.py` (commit jako dowód decyzji vs .gitignore); zwalidować demo przy progu 0.40 (Pożyczka=0.39 jest na styk).
 - _Akceptacja:_ ~~pytanie #5 zwraca `[]`~~ **KOREKTA (dowód Step 0):** #5 „hipoteczny" scoruje WYSOKO (0.52–0.81 we wszystkich modelach — semantycznie blisko de minimis), więc **NIE** zwraca `[]`. Refuse #5 musi przyjść z promptu LLM (cite-or-admit, Faza 3), nie z progu. Próg łapie tylko czyste OOD typu „Mongolia". → Faza 2 akcept.: 5 pytań trafia w dobre chunki; OOD-Mongolia → relevance ~0.
 
-## Faza 3 — Lokalizacja promptów na PL — S
-- [ ] 3.1 `qa_system_prompt` → PL (zachowaj „tylko kontekst" + sekcję Źródła)
-- [ ] 3.2 Refusal → „Nie wiem — brak podstawy w dokumentach"
-- [ ] 3.3 Rozważ PL dla `contextualize_q_system_prompt`
-- [ ] 3.4 Tytuł/nagłówek → PL/BGK (app.py:33-34)
-- [ ] **3.R Podwójna kontrola — `/dev-docs-review`**
-- _Akceptacja:_ odpowiedzi i refusal naturalne po polsku
+## Faza 3 — Lokalizacja promptów na PL — S [R] (commit 6909bec)
+- [x] 3.1 `qa_system_prompt` → PL + decyzja 2b (usunięta instrukcja „append Citations" — cytaty tylko z `_format_citations`)
+- [x] 3.2 Refusal → „Nie wiem — brak podstawy w dokumentach." (cudzysłów typograficzny „…”, nie ASCII — był 1 bug składni, naprawiony)
+- [x] 3.3 `contextualize_q_system_prompt` → PL
+- [x] 3.4 Tytuł/nagłówek + spinner + nagłówki Odpowiedź/Źródła + „page→strona" → PL
+- [x] **3.R Podwójna kontrola — `/dev-docs-review`** → subagent: 0 blockerów, akceptacja. Nity Fazy 5: tooltip slidera wciąż EN.
+- _Akceptacja:_ ✅ prompty i refusal naturalne po polsku, składnia/encoding OK, CI zielone
 
 ## Faza 4 — Refactor pipeline + debug panel — L
 - [ ] 4.1 Ręczny rewrite (capture rewritten_question)
