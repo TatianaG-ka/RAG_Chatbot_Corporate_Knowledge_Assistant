@@ -127,7 +127,7 @@ The deployed app **does not ship or load a pickled index**. In Quick demo mode i
 
 **Decision:** replace the opaque chain with a **manual pipeline** (see `app.py`) built on two helpers in `rag_index.py`:
 - `retrieve_scored()` fetches the top `RETRIEVAL_K=12` chunks with a 0–1 relevance score (from the vectorstore's own `_select_relevance_score_fn`, the same value a `similarity_score_threshold` retriever would use).
-- `select_context()` keeps chunks above a **sidebar-tunable threshold** (default `0.35`), up to `CONTEXT_K=8`, with a per-document cap (`MAX_PER_DOC=4`) so one large PDF can't monopolize context.
+- `select_context()` keeps chunks above a **sidebar-tunable threshold** (default `0.35`), up to `CONTEXT_K=8`, with a per-document cap (`MAX_PER_DOC=4`) so one large document can't monopolize context.
 
 When **no** chunk clears the threshold, the app answers *„Nie wiem — brak podstawy w dokumentach."* **without ever calling the LLM** (a deterministic honest refusal). Every stage — rewritten query, per-chunk relevance/L2 scores, which chunks reached the LLM, stage latencies — is exposed in a Debug panel.
 
@@ -278,9 +278,23 @@ If you prefer to run the project locally:
 <a id="screenshots"></a>
 ### Screenshots
 
-*„Asystent Wiedzy BRH" — fictional Bank Rozwoju Horyzont corpus, Polish demo questions, source citations and honest refusal.*
+*„Asystent Wiedzy BRH" — the fictional Bank Rozwoju Horyzont corpus, Polish demo questions, source citations, an observable retrieval pipeline, and honest refusal.*
 
-> Screenshots to be regenerated from the live BRH demo (the earlier BGK-branded screenshots were removed in the BRH switch).
+**1. Quick demo home** — title, the five rehearsed Polish demo questions, and the sidebar config (relevance threshold `0.35`, Groq model, multilingual embeddings). The `GROQ_API_KEY` is read from the Space secret, so the key field is hidden.
+
+![Asystent Wiedzy BRH — home screen](screenshots/brh_01_demo.png)
+
+**2. Grounded answer with citations + debug panel** — *„Do jakiej części kredytu sięga gwarancja de minimis „Rozwój"?"* → **60%**, with deterministic source citations. The Debug panel exposes the whole pipeline: rewritten query (here *„Brak historii rozmowy — zapytanie nieprzeformułowane"*, since it is the first turn), per-chunk relevance/L2 scores, the `0.35` threshold, the per-document cap, and stage latencies — the auditability story.
+
+![Answer with citations and the retrieval debug panel](screenshots/brh_02_answer_citations.png)
+
+**3. Compliance-grade answer (human-in-the-loop AI)** — *„Czy BRH pozwala na w pełni automatyczną decyzję kredytową AI?"* → the assistant cites §3 of the responsible-AI policy: fully automated credit decisions without human oversight are prohibited. Exactly the kind of grounded, source-backed answer a regulated bank needs.
+
+![Human-in-the-loop AI policy answer](screenshots/brh_03_ai_governance.png)
+
+**4. Honest refusal (no hallucination)** — *„Jakie jest oprocentowanie lokaty terminowej w BRH?"* → BRH has no deposit products, no chunk clears the threshold, so the app answers *„Nie wiem — brak podstawy w dokumentach."* **without ever calling the LLM**.
+
+![Honest refusal when the corpus does not cover the question](screenshots/brh_04_honest_refusal.png)
 
 
 ### License
