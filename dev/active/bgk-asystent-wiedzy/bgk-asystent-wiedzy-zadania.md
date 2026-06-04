@@ -7,19 +7,22 @@ Legenda: `[ ]` do zrobienia · `[~]` w toku · `[x]` zrobione · `[R]` po podwó
 
 ---
 
-## Faza 1 — Walidacja korpusu (blokująca) — S
-- [ ] 1.1 Sprawdź, że każdy z 6 PDF-ów BGK zwraca tekst (nie skan) — `load_paths` + znaki/stronę
-- [ ] 1.2 Zsynchronizuj `_DEMO_ASSET_SUFFIXES` (app.py) ↔ `SUPPORTED_SUFFIXES` (build_demo_index.py)
-- [ ] 1.3 Potwierdź obecność faktów z 5 pytań demo (kwoty, %, okresy) w tekście PDF-ów
-- _Akceptacja:_ każdy PDF > ~200 znaków/stronę, brak pliku zerowego, fakty obecne. (bez code-review — brak zmian w kodzie)
+## Faza 1 — Walidacja korpusu (blokująca) — S ✅
+- [x] 1.1 Sprawdź, że każdy z 6 PDF-ów BGK zwraca tekst (nie skan) — `load_paths` + znaki/stronę
+      → wszystkie tekstowe (de minimis 13s, Biznesmax 36s, przewodnik 32s, RODO 3s, zasady 15s, Strategia 21s ~rzadki tekst, prezentacja)
+- [x] 1.2 Zsynchronizuj `_DEMO_ASSET_SUFFIXES` (app.py) ↔ `SUPPORTED_SUFFIXES` (build_demo_index.py) — już zgodne ({.pdf,.txt,.md,.markdown})
+- [x] 1.3 Potwierdź obecność faktów z 5 pytań demo → de minimis **60%** (0× „80%"), 60/120 mies., prowizja 0,5%, Pożyczka min 5 mln zł, do 100% netto. ⚠️ „JST/uczelnie" brak w PDF (→ Faza 5/luka).
+- _Akceptacja:_ ✅ spełniona. (bez code-review — brak zmian w kodzie)
 
-## Faza 2 — Model embeddingów multilingual — M
-- [ ] 2.1 `EMB_MODEL` → `intfloat/multilingual-e5-base` (rag_index.py:17)
-- [ ] 2.2 Zaktualizuj podpis embeddingów (app.py:62, 330)
-- [ ] 2.3 Zweryfikuj prefiksy E5 `query:`/`passage:` — wrapper czy bez?
-- [ ] 2.4 Przebuduj indeks + sprawdź trafność 5 pytań
-- [ ] **2.R Podwójna kontrola — `/dev-docs-review`**
-- _Akceptacja:_ 5 pytań trafia; pytanie-pułapka #5 zwraca `[]`
+## Faza 2 — Model embeddingów multilingual — M [R] (2.R OK po fixie)
+- [x] 2.1 `EMB_MODEL` → **`paraphrase-multilingual-MiniLM-L12-v2`** (rag_index.py) + `normalize_embeddings=True`
+      → NIE e5-base. Dowód Step 0 (`_diag_step0.py`): e5 świetnie rankinguje, ale kompresuje score'y do 0.65–0.83 → „stolica Mongolii" = 0.72, próg nie odrzuci OOD. paraphrase daje Mongolię **−0.01** (czysta separacja) + cyfryzacja TOP1.
+      ⚠️ **2.R FIX:** `normalize_embeddings=True` było w `_diag_step0.py`, ale BRAKOWAŁO w produkcyjnym `build_embeddings()` → bez niego WSZYSTKIE pytania IN scorowały <0 (−4.9…−22) → retriever zwracał `[]` na wszystko. Dodane (`rag_index.py:34`). Po fixie IN=0.39–0.80, OOD=−0.01. ✅
+- [x] 2.2 Podpis embeddingów (app.py:62, 330) → teraz z importu `EMB_MODEL` (single source of truth, nie może się rozjechać)
+- [x] 2.3 Prefiksy E5 — N/D (porzucono e5; paraphrase jest drop-in bez prefiksów). Wrapper E5 zachowany tylko w `_diag_step0.py`.
+- [x] 2.4 Indeks + trafność 5 pytań → po fixie IN przechodzi próg. 🟠 OTWARTE: top-1 dla „de minimis" to czasem Biznesmax_Plus, nie de_minimis — ryzyko cytowania 80% zamiast 60%. Dotunować w Fazie 4 (k / chunk / prompt).
+- [x] **2.R Podwójna kontrola — `/dev-docs-review`** → subagent (code-architecture-reviewer) empirycznie potwierdził blocker normalize; fix zaaplikowany + zweryfikowany; CI zielone. 🟠 do zrobienia: zdecydować los `_diag_step0.py` (commit jako dowód decyzji vs .gitignore); zwalidować demo przy progu 0.40 (Pożyczka=0.39 jest na styk).
+- _Akceptacja:_ ~~pytanie #5 zwraca `[]`~~ **KOREKTA (dowód Step 0):** #5 „hipoteczny" scoruje WYSOKO (0.52–0.81 we wszystkich modelach — semantycznie blisko de minimis), więc **NIE** zwraca `[]`. Refuse #5 musi przyjść z promptu LLM (cite-or-admit, Faza 3), nie z progu. Próg łapie tylko czyste OOD typu „Mongolia". → Faza 2 akcept.: 5 pytań trafia w dobre chunki; OOD-Mongolia → relevance ~0.
 
 ## Faza 3 — Lokalizacja promptów na PL — S
 - [ ] 3.1 `qa_system_prompt` → PL (zachowaj „tylko kontekst" + sekcję Źródła)
@@ -56,3 +59,6 @@ Legenda: `[ ]` do zrobienia · `[~]` w toku · `[x]` zrobione · `[R]` po podwó
 
 ## Notatki postępu
 - 2026-06-04: plan utworzony. Środowisko (.venv) naprawione po przerwanej instalacji. Korpus 6 PDF już w `assets/` (niezacommitowany). Kod jeszcze nietknięty.
+- 2026-06-04 (cd.): **Faza 1 ✅** (walidacja korpusu). **Bramka 1 planu Fazy 4** wykonana z wyprzedzeniem: `refactor-planner` → plan refactoru debug panelu, `plan-reviewer` → adversarial review (kluczowe poprawki: użyć **publicznego** `similarity_search_with_relevance_scores` zamiast prywatnego `_select_relevance_score_fn`; usunąć instrukcję cytatów z `qa_system_prompt` by uniknąć podwójnych cytatów; wydzielić czystą `score_documents` do `rag_index.py` jako pierwszy unit test; try/except na rewrite). **Step 0 ✅** (`_diag_step0.py`) — porównanie 3 modeli na korpusie BGK z polskimi diakrytykami → wybór paraphrase-multilingual (dowody w Fazie 2). **Faza 2 kod ✅** (EMB_MODEL + normalizacja + podpisy z importu), compileall OK, czeka na 2.R.
+- ⚠️ Korekta planu: refuse #5 idzie z promptu (Faza 3), nie z progu (Faza 2) — dowód w Step 0.
+- 🔧 Środowisko: lokalnie zainstalowano Python 3.11.9 (winget) — stare piny (numpy 1.26) nie mają wheeli na 3.13; 3.11 = zgodność z HF Space/CI.

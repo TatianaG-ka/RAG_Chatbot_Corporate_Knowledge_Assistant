@@ -57,12 +57,17 @@ Bez tego reszta nie ma sensu (PyPDFLoader nie ma OCR).
 1.3 Potwierdź, że dokumenty zawierają fakty z 5 pytań demo (kwoty, %, okresy).
 - **Akceptacja:** każdy PDF > ~200 znaków/stronę; brak pliku zerowego; fakty obecne. Bez zmian w kodzie → bez code-review.
 
-### Faza 2 — Model embeddingów multilingual — **M**
-2.1 Zmień `EMB_MODEL` w `rag_index.py:17` na `intfloat/multilingual-e5-base` (lub `paraphrase-multilingual-MiniLM-L12-v2`).
-2.2 Zaktualizuj podpis embeddingów w sidebarze (`app.py:62`) i sekcji „Info/Limits" (`app.py:330`).
-2.3 Uwaga e5: modele E5 wymagają prefiksów `query:` / `passage:` — zweryfikuj, czy potrzebny wrapper, czy wariant bez prefiksów wystarcza dla demo.
-2.4 Przebuduj indeks (cold start) i sprawdź trafność na 5 pytaniach.
-- **Akceptacja:** 5 pytań demo zwraca właściwe chunki; pytanie-pułapka (#5) zwraca `[]`. **→ podwójna kontrola.**
+### Faza 2 — Model embeddingów multilingual — **M** ✅ (kod gotowy, czeka na 2.R)
+2.1 ✅ `EMB_MODEL` → **`paraphrase-multilingual-MiniLM-L12-v2`** + `normalize_embeddings=True`.
+   **Decyzja oparta na danych (Step 0, `_diag_step0.py`):** porównano 3 modele na korpusie BGK z polskimi
+   diakrytykami. e5-base ma najlepszy ranking, ale **kompresuje score'y do 0.65–0.83** → „stolica Mongolii"
+   dostaje 0.72, więc próg nie odrzuci OOD (zabija wizualną narrację honest-refusal). paraphrase-multilingual:
+   Mongolia **−0.01** (czysta separacja), cyfryzacja TOP1, drop-in bez prefiksów, mniejszy → szybszy cold-start.
+2.2 ✅ Podpis embeddingów (`app.py:62`, `:330`) renderowany z importu `EMB_MODEL` (single source of truth).
+2.3 ✅ Prefiksy E5 — porzucone wraz z e5 (paraphrase nie wymaga). Wrapper E5 został w `_diag_step0.py`.
+2.4 ✅ Trafność 5 pytań zweryfikowana w Step 0.
+- **Akceptacja:** ~~pytanie #5 zwraca `[]`~~ **KOREKTA:** #5 „hipoteczny" scoruje wysoko (blisko de minimis),
+  refuse #5 idzie z promptu (Faza 3), nie z progu. Akcept.: 5 pytań trafia w dobre chunki; OOD „Mongolia" → ~0. **→ 2.R podwójna kontrola.**
 
 ### Faza 3 — Lokalizacja promptów na PL — **S**
 3.1 Przetłumacz `qa_system_prompt` (`app.py:253-258`) na PL, zachowując regułę „używaj TYLKO kontekstu" + sekcję „Źródła".
@@ -74,8 +79,10 @@ Bez tego reszta nie ma sensu (PyPDFLoader nie ma OCR).
 ### Faza 4 — Refactor pipeline + debug panel (największa) — **L**
 Rozbij `create_retrieval_chain` na ręczny pipeline (wzór: `docs/wczesniej/RAG_UPGRADE_DECISION_2026-05-08.md` §7 krok 5).
 4.1 Ręczny krok rewrite (capture `rewritten_question`).
-4.2 Ręczny retrieval ze score'ami: `similarity_search_with_score`, konwersja przez
-   `vs._select_relevance_score_fn()` → similarity 0-1; pokaż **oba** `raw_distance` (L2) i `score`.
+4.2 Ręczny retrieval ze score'ami: **publiczne** `vs.similarity_search_with_relevance_scores(k, score_threshold)`
+   (poprawka plan-reviewer A1 — to dokładnie to, czego używa retriever wewnętrznie; usuwa zależność od prywatnej
+   `_select_relevance_score_fn` i ryzyko niezgodności). Opcjonalnie drugie wywołanie `similarity_search_with_score`
+   dla wyświetlenia surowego dystansu L2 obok similarity 0-1.
 4.3 Jeśli nic nie przejdzie progu → alert „Nie wiem", pomiń LLM.
 4.4 Ręczny stuff + wywołanie LLM; zachowaj pamięć rozmowy (history-aware).
 4.5 Debug expander: przepisane zapytanie, top-K ze score'ami (✅/✗ próg), próg, model, latency_ms.

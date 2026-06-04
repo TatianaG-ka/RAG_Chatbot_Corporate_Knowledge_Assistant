@@ -36,12 +36,17 @@
 
 ## Decyzje techniczne
 
-1. **Multilingual embeddingi** — `all-MiniLM-L6-v2` jest EN-only; korpus PL → `intfloat/multilingual-e5-base`.
-   Uwaga: modele E5 oczekują prefiksów `query:`/`passage:`. Zweryfikować w Fazie 2.
-2. **Konwersja score'ów = `vs._select_relevance_score_fn()`** (L2 → similarity 0-1), **NIE** `1 - threshold`.
-   Ten skrót był bugiem w propozycji kolegi — debug panel pokazywałby „passed/filtered" niespójne z
-   faktycznym retrieverem → senior signal odwraca się w junior signal. Pokazać w panelu **oba**:
-   `raw_distance` (L2) i `score` (0-1).
+1. **Multilingual embeddingi** — `all-MiniLM-L6-v2` jest EN-only; korpus PL → **`paraphrase-multilingual-MiniLM-L12-v2`**
+   + `normalize_embeddings=True` (czyste relevance ∈ [0,1]). Wybór z danych Step 0: e5-base ma lepszy ranking, ale
+   kompresuje score'y (OOD „Mongolia" 0.72 → próg bezużyteczny); paraphrase daje OOD ~0 = czysta separacja dla
+   honest-refusal. e5 odrzucony też z powodu komplikacji prefiksów `query:`/`passage:`.
+2. **Konwersja score'ów = publiczne `vs.similarity_search_with_relevance_scores(k, score_threshold)`**
+   (poprawka plan-reviewer A1) — to dokładnie ta sama ścieżka, której używa retriever; spójność panel↔retriever
+   gwarantowana, bez zależności od prywatnej `_select_relevance_score_fn`. **NIE** używać `1 - threshold` (bug kolegi —
+   junior signal). Dla wyświetlenia można dodać surowy dystans L2 z `similarity_search_with_score`.
+2b. **Cytaty deterministyczne, jedno źródło** (poprawka plan-reviewer C3) — usunąć z `qa_system_prompt` instrukcję
+   „append a Citations section" (LLM zmyśla/myli nazwy plików). Zostają tylko cytaty z `_format_citations(used)`.
+   Krytyczne dla narracji audytowalności (KNF/UODO).
 3. **Brak shipowanego pickle** — indeks rebuildowany in-memory z `assets/` przy cold starcie (ADR-4).
    Trade: ~15-30s first-load za trwałą kompatybilność. Nie commitować `vectorstore/`.
 4. **de minimis = 60%** (nie 80%). 80% dotyczy Biznesmax/Ekomax. Makieta DEMO myli — wyrównać do dokumentu.
