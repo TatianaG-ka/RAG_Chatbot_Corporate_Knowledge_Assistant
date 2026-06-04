@@ -1,25 +1,35 @@
 import os
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.documents import Document
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_groq import ChatGroq
 
 from rag_index import (
     EMB_MODEL,
+    ScoredChunk,
     build_embeddings,
     build_faiss_from_docs,
     load_paths,
+    retrieve_scored,
+    select_context,
 )
+
+# Retrieval breadth. RETRIEVAL_K chunks are scored for the debug panel (so we can
+# show what fell below the threshold); at most CONTEXT_K passing chunks are fed to
+# the LLM, matching the previous k=4 retriever budget. MAX_PER_DOC caps how many
+# chunks a single source contributes, so one large PDF can't monopolize context.
+RETRIEVAL_K = 8
+CONTEXT_K = 4
+MAX_PER_DOC = 2
 
 # Supported suffixes for the demo index — kept in sync with build_demo_index.py.
 _DEMO_ASSET_SUFFIXES = {".pdf", ".txt", ".md", ".markdown"}
@@ -269,61 +279,146 @@ qa_prompt = ChatPromptTemplate.from_messages(
 )
 
 
-def _get_retriever(threshold: float):
-    store = st.session_state.get(VS_KEY)
-    if store is None:
-        st.warning("Index not loaded. Use 'Quick demo (prebuilt)' or build index from uploads.")
-        st.stop()
-    # similarity_score_threshold keeps the retriever honest: when nothing in the
-    # index is close enough to the query, it returns [] and the LLM answers
-    # "I don't know" instead of hallucinating over unrelated chunks.
-    return store.as_retriever(
-        search_type="similarity_score_threshold",
-        search_kwargs={"k": 4, "score_threshold": threshold},
-    )
+def _render_debug(
+    original: str,
+    rewritten: str,
+    scored: List[ScoredChunk],
+    used: List[Document],
+    threshold: float,
+    model: str,
+    rewrite_ms: int,
+    retrieval_ms: int,
+    llm_ms: Optional[int],
+) -> None:
+    """Make the retrieval pipeline observable: rewritten query, per-chunk scores
+    (relevance vs raw L2), which chunks actually reached the LLM, and stage
+    latency. Marks distinguish chunks fed to the LLM (✅) from ones that cleared
+    the threshold but were dropped by the per-document cap (➖) and ones below the
+    threshold (✗) — so the panel matches exactly what the LLM received."""
+    used_ids = {id(d) for d in used}
+    with st.expander("🔎 Debug: retrieval i pipeline"):
+        st.markdown(f"**Zapytanie użytkownika:** {original}")
+        if rewritten != original:
+            st.markdown(f"**Przeformułowane (history-aware):** {rewritten}")
+        else:
+            st.caption("Brak historii rozmowy — zapytanie nieprzeformułowane.")
+
+        timings = []
+        if rewrite_ms:
+            timings.append(f"rewrite {rewrite_ms} ms")
+        timings.append(f"retrieval {retrieval_ms} ms")
+        if llm_ms is not None:
+            timings.append(f"LLM {llm_ms} ms")
+        st.markdown(
+            f"**Próg trafności:** {threshold:.2f}  ·  **Model:** {model}  ·  "
+            f"**Czas:** {' · '.join(timings)}"
+        )
+
+        st.markdown(
+            f"**Top-{len(scored)} fragmenty** — ✅ trafia do LLM · "
+            f"➖ powyżej progu, odcięte limitem {MAX_PER_DOC}/dokument · ✗ poniżej progu:"
+        )
+        for i, sc in enumerate(scored, 1):
+            src = Path(sc.doc.metadata.get("source", "unknown")).name
+            page = sc.doc.metadata.get("page")
+            loc = f", str. {page + 1}" if page is not None else ""
+            if id(sc.doc) in used_ids:
+                mark = "✅"
+            elif sc.relevance >= threshold:
+                mark = "➖"
+            else:
+                mark = "✗"
+            st.markdown(
+                f"{mark} **[{i}]** relevance=`{sc.relevance:.3f}`  ·  "
+                f"L2=`{sc.distance:.2f}`  ·  {src}{loc}"
+            )
+            snippet = sc.doc.page_content.strip()
+            st.caption(snippet[:300] + ("…" if len(snippet) > 300 else ""))
+
+        capped = [
+            sc for sc in scored
+            if sc.relevance >= threshold and id(sc.doc) not in used_ids
+        ]
+        if capped:
+            st.caption(
+                f"➖ {len(capped)} fragment(ów) przekroczyło próg, ale zostało "
+                f"odciętych limitem {MAX_PER_DOC}/dokument (dywersyfikacja źródeł — "
+                "by jeden duży dokument nie zdominował kontekstu)."
+            )
 
 
 if st.button("Send") and query.strip():
-    retriever = _get_retriever(score_threshold)
-    history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-    doc_chain = create_stuff_documents_chain(llm, qa_prompt)
-    rag_chain = create_retrieval_chain(history_aware_retriever, doc_chain)
-
-    conv = RunnableWithMessageHistory(
-        rag_chain,
-        _get_session_history,
-        input_messages_key="input",
-        history_messages_key="chat_history",
-        output_messages_key="answer",
-    )
-    cfg = {"configurable": {"session_id": session_id}}
-
-    with st.spinner("Myślę…"):
-        result = conv.invoke({"input": query}, config=cfg)
-
-    answer = result.get("answer") or result.get("result") or ""
-    ctx_docs: List[Document] = result.get("context", [])
-    citations = _format_citations(ctx_docs)
-
-    st.markdown("### Odpowiedź")
-    st.write(answer)
-
-    st.markdown("### Źródła")
-    if citations:
-        st.write("\n".join(citations))
+    store = st.session_state.get(VS_KEY)
+    if store is None:
+        st.warning("Indeks nie został wczytany. Użyj trybu „Quick demo” lub zbuduj indeks z plików.")
     else:
-        st.write("Brak źródeł (retriever nie zwrócił nic powyżej progu trafności).")
+        history = _get_session_history(session_id)
+        # Snapshot the prior turns: history.messages is a live reference, and we
+        # append this turn's user+AI messages below — copy so what we send to the
+        # LLM can never include the turn it is currently answering.
+        hist_msgs = list(history.messages)
 
-    with st.expander("Debug: context (top-k)"):
-        for i, d in enumerate(ctx_docs, 1):
-            src = d.metadata.get("source", "unknown")
-            page = d.metadata.get("page")
-            head = f"[{i}] {Path(src).name}"
-            if page is not None:
-                head += f" (page {page + 1})"
-            st.markdown(f"**{head}**")
-            snippet = d.page_content.strip()
-            st.write(snippet[:800] + ("..." if len(snippet) > 800 else ""))
+        # 1. History-aware rewrite — only when there is prior context to fold in.
+        if hist_msgs:
+            rw_t0 = time.perf_counter()
+            rewritten = (
+                (contextualize_q_prompt | llm | StrOutputParser())
+                .invoke({"input": query, "chat_history": hist_msgs})
+                .strip()
+            )
+            rewrite_ms = round((time.perf_counter() - rw_t0) * 1000)
+        else:
+            rewritten = query
+            rewrite_ms = 0
+
+        # 2. Manual retrieval with scores, then honest threshold filter.
+        ret_t0 = time.perf_counter()
+        scored = retrieve_scored(store, rewritten, k=RETRIEVAL_K)
+        retrieval_ms = round((time.perf_counter() - ret_t0) * 1000)
+        used = select_context(scored, score_threshold, CONTEXT_K, MAX_PER_DOC)
+
+        if not used:
+            # 3. Nothing cleared the threshold → refuse honestly, skip the LLM.
+            answer = "Nie wiem — brak podstawy w dokumentach."
+            history.add_user_message(query)
+            history.add_ai_message(answer)
+            st.markdown("### Odpowiedź")
+            st.warning(answer)
+            st.caption(
+                "Żaden fragment nie przekroczył progu trafności — "
+                "odpowiedź wstrzymana bez wywołania LLM (honest refusal)."
+            )
+            st.markdown("### Źródła")
+            st.write("Brak źródeł powyżej progu trafności.")
+            _render_debug(
+                query, rewritten, scored, used, score_threshold, model_name,
+                rewrite_ms, retrieval_ms, None,
+            )
+        else:
+            # 4. Stuff the passing chunks and call the LLM (history-aware).
+            context = "\n\n".join(d.page_content for d in used)
+            llm_t0 = time.perf_counter()
+            with st.spinner("Myślę…"):
+                answer = (qa_prompt | llm).invoke(
+                    {"context": context, "chat_history": hist_msgs, "input": query}
+                ).content
+            llm_ms = round((time.perf_counter() - llm_t0) * 1000)
+
+            history.add_user_message(query)
+            history.add_ai_message(answer)
+
+            # 5. Answer + deterministic citations (from used chunks) + debug panel.
+            st.markdown("### Odpowiedź")
+            st.write(answer)
+
+            citations = _format_citations(used)
+            st.markdown("### Źródła")
+            st.write("\n".join(citations) if citations else "Brak źródeł.")
+
+            _render_debug(
+                query, rewritten, scored, used, score_threshold, model_name,
+                rewrite_ms, retrieval_ms, llm_ms,
+            )
 
 with st.expander("Info / Limits"):
     st.markdown(
@@ -332,5 +427,7 @@ with st.expander("Info / Limits"):
         "- No pickle deserialization at runtime — see ADR-4 in README for why.\n"
         "- LLM: ChatGroq (selectable in sidebar)\n"
         f"- Embeddings: {EMB_MODEL}\n"
-        "- Retrieval: similarity_score_threshold (k=4). Threshold adjustable in sidebar."
+        f"- Retrieval: ręczny pipeline — top-{RETRIEVAL_K} fragmentów ze score'ami, "
+        f"filtr progu, max {CONTEXT_K} do LLM (max {MAX_PER_DOC}/dokument). "
+        "Próg regulowany w panelu bocznym; szczegóły w „Debug: retrieval i pipeline”."
     )

@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
@@ -29,6 +30,78 @@ CHUNK_OVERLAP = 200
 class IndexInfo:
     n_chunks: int
     outdir: Path
+
+
+@dataclass(frozen=True)
+class ScoredChunk:
+    """A retrieved chunk with both score representations.
+
+    relevance: 0-1 similarity, the SAME number the sidebar threshold compares
+               against and the same value the similarity_score_threshold
+               retriever uses internally — so a debug panel built from this is
+               guaranteed to agree with what the chain actually feeds the LLM.
+    distance:  raw L2 distance straight from FAISS (lower = closer). Shown
+               alongside relevance to make the distance->similarity conversion
+               explicit rather than hand-wavy.
+    """
+
+    doc: Document
+    relevance: float
+    distance: float
+
+
+def retrieve_scored(vs: FAISS, query: str, k: int = 8) -> List[ScoredChunk]:
+    """Retrieve top-k chunks with 0-1 relevance AND raw L2 distance, in a single
+    embedding pass.
+
+    ``similarity_search_with_score`` returns the raw L2 distance (lower = closer).
+    Each distance is converted to a 0-1 relevance with the vectorstore's OWN
+    relevance score function — the exact callable that
+    ``similarity_search_with_relevance_scores`` (and hence the
+    ``similarity_score_threshold`` retriever) uses internally — so the relevance
+    reported here is guaranteed to equal what a threshold retriever would compute,
+    without a second search or a fragile positional ``zip`` of two result lists.
+    No threshold is applied; callers filter on ``relevance`` so the debug panel
+    can also show what got rejected. (Out-of-corpus queries legitimately yield
+    relevance < 0 — that negative score is the honest-refusal signal.)
+    """
+    relevance_fn = vs._select_relevance_score_fn()
+    return [
+        ScoredChunk(doc=doc, relevance=float(relevance_fn(distance)), distance=float(distance))
+        for doc, distance in vs.similarity_search_with_score(query, k=k)
+    ]
+
+
+def select_context(
+    scored: List[ScoredChunk],
+    threshold: float,
+    k: int,
+    max_per_doc: int = 2,
+) -> List[Document]:
+    """Pick up to ``k`` above-threshold chunks, capping how many come from any
+    one source document.
+
+    ``scored`` must be ordered by descending relevance (as ``retrieve_scored``
+    returns it). Without the per-document cap a single large file monopolises the
+    top-k with near-duplicate chunks and crowds out a smaller, more authoritative
+    source. Concretely for the BGK corpus: a "gwarancja de minimis" question fills
+    its top-4 entirely from the 36-page FENG/Biznesmax PDF (which quotes 80%) and
+    never reaches the dedicated de minimis document (which states 60%). Capping
+    per document forces that authoritative source into the context.
+    """
+    per_doc: dict = defaultdict(int)
+    picked: List[Document] = []
+    for sc in scored:
+        if sc.relevance < threshold:
+            continue
+        src = sc.doc.metadata.get("source", "?")
+        if per_doc[src] >= max_per_doc:
+            continue
+        per_doc[src] += 1
+        picked.append(sc.doc)
+        if len(picked) >= k:
+            break
+    return picked
 
 
 def build_embeddings() -> HuggingFaceEmbeddings:
