@@ -31,8 +31,8 @@ GROQ_ENV = os.getenv("GROQ_API_KEY", "")
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
 
-st.set_page_config(page_title="RAG + ChatGroq Demo", layout="wide")
-st.title("Company Knowledge Assistant - RAG (PDF/TXT/MD) Demo - ChatGroq + FAISS + Citations")
+st.set_page_config(page_title="Asystent Wiedzy BGK — RAG demo", layout="wide")
+st.title("Asystent Wiedzy BGK — RAG z cytowaniem źródeł (demo)")
 
 # --- sidebar -------------------------------------------------------------
 with st.sidebar:
@@ -117,7 +117,7 @@ def _format_citations(context_docs: List[Document]) -> List[str]:
             continue
         seen.add(key)
         name = Path(src).name
-        out.append(f"- {name}, page {page + 1}" if page is not None else f"- {name}")
+        out.append(f"- {name}, strona {page + 1}" if page is not None else f"- {name}")
     return out
 
 
@@ -240,8 +240,9 @@ if not groq_api_key:
 llm = get_llm(groq_api_key, model_name)
 
 contextualize_q_system_prompt = (
-    "Given the chat history and the latest user input, rewrite it as a standalone question "
-    "that can be understood without the chat history. Do NOT answer the question."
+    "Na podstawie historii rozmowy i ostatniego pytania użytkownika przeformułuj je "
+    "w samodzielne pytanie, zrozumiałe bez znajomości historii rozmowy. "
+    "NIE odpowiadaj na pytanie — tylko je przeformułuj."
 )
 contextualize_q_prompt = ChatPromptTemplate.from_messages(
     [
@@ -252,9 +253,11 @@ contextualize_q_prompt = ChatPromptTemplate.from_messages(
 )
 
 qa_system_prompt = (
-    "You are a QA assistant answering questions based on the company's knowledge base.\n"
-    "Use ONLY the provided context. If the answer is not in the context, say 'I don't know'.\n"
-    "At the end, append a 'Citations' section listing unique file names (and pages if available).\n\n"
+    "Jesteś asystentem, który odpowiada na pytania na podstawie bazy wiedzy BGK "
+    "(publiczne dokumenty Banku Gospodarstwa Krajowego).\n"
+    "Korzystaj WYŁĄCZNIE z podanego poniżej kontekstu. Jeśli odpowiedzi nie ma w kontekście, "
+    "napisz dokładnie: „Nie wiem — brak podstawy w dokumentach.” i nie dodawaj nic więcej.\n"
+    "Nie zgaduj i nie korzystaj z wiedzy spoza kontekstu. Odpowiadaj po polsku.\n\n"
     "{context}"
 )
 qa_prompt = ChatPromptTemplate.from_messages(
@@ -295,21 +298,21 @@ if st.button("Send") and query.strip():
     )
     cfg = {"configurable": {"session_id": session_id}}
 
-    with st.spinner("Thinking..."):
+    with st.spinner("Myślę…"):
         result = conv.invoke({"input": query}, config=cfg)
 
     answer = result.get("answer") or result.get("result") or ""
     ctx_docs: List[Document] = result.get("context", [])
     citations = _format_citations(ctx_docs)
 
-    st.markdown("### Answer")
+    st.markdown("### Odpowiedź")
     st.write(answer)
 
-    st.markdown("### Citations")
+    st.markdown("### Źródła")
     if citations:
         st.write("\n".join(citations))
     else:
-        st.write("No citations (retriever returned nothing above the score threshold).")
+        st.write("Brak źródeł (retriever nie zwrócił nic powyżej progu trafności).")
 
     with st.expander("Debug: context (top-k)"):
         for i, d in enumerate(ctx_docs, 1):
